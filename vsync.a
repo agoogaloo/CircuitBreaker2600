@@ -18,6 +18,7 @@ press
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 SpriteHeight	equ 13 
+ScoreHeight	equ 12
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
@@ -26,11 +27,19 @@ SpriteHeight	equ 13
 	org $80
 
 MvTimer		.byte
-XPos		.byte
-YPos		.byte
-FramePtr	.word
+P1XPos		.byte
+P2XPos		.byte
+P1YPos		.byte
+P2YPos		.byte
+P1FramePtr	.word
+P2FramePtr	.word
+
 PFIdx		.byte
 PFCounter	.byte
+
+Num1		.byte
+Num2		.byte
+Bar1		.byte
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
@@ -41,15 +50,32 @@ PFCounter	.byte
 Start
 	CLEAN_START
 ; init
+; player position/colours
         lda #80
-        sta YPos
-        sta XPos
+        sta P1YPos
+        sta P1XPos
+        sta P2YPos
+        sta P2XPos
         lda #$1F
         sta COLUP0
+        lda #$2F
+        sta COLUP1
+; sprite frames
         lda #<FrameU0
-        sta FramePtr
+        sta P1FramePtr
+	sta P2FramePtr
         lda #>FrameU0
-        sta FramePtr+1
+        sta P1FramePtr+1
+        sta P2FramePtr+1
+        
+        lda #200
+        sta Num1
+        lda #20
+        sta Num2
+        
+; vertical delay on p0 so they are both synced to the right scanline        
+        lda #1
+        sta VDELP0
         
 ; main loop
 NextFrame
@@ -60,81 +86,116 @@ NextFrame
 ; 37 lines of underscan
 	TIMER_SETUP 37
 ; move X and Y coordinates w/ joystick
+; give player in y register
+	ldy #0
 	jsr MoveJoystick
+        ldy #1
+        jsr MoveJoystick
         
 ; animation!
 	inc MvTimer
 	lda MvTimer
 
-        
-        
+; score board/timer display
+	jsr BCDBitmap
        
         
 ; Background/playfield colours
-        lda #$C3
+        lda #$c3
         sta COLUBK
         lda #$2f
         sta COLUPF
         
 ; the next two scanlines
 ; position the player horizontally
-	lda XPos	; get X coordinate
+	lda P1XPos	; get X coordinate
         ldx #0		; player 0
         jsr SetHorizPos	; set coarse offset
+        lda P2XPos	; get X coordinate
+        ldx #1		; player 0
+        jsr SetHorizPos	; set coarse offset
+        lda #30
+        ldx #2		;missle/energe bar pos
+        jsr SetHorizPos
+         lda #32
+        ldx #3		;missle/energe bar pos
+        jsr SetHorizPos
         sta WSYNC	; sync w/ scanline
         sta HMOVE	; apply fine offsets
+        
 ; it's ok if we took an extra scanline because
 ; the PIA timer will always count 37 lines
 ; wait for end of underscan
         TIMER_WAIT
 ; 192 lines of frame
 	ldx #192	; X = 192 scanlines
+        
 LVScan
+; drawing kernel
+; energy bars
+	
+
+; scoreboard
+	txa
+        cmp #ScoreHeight
+        ;bcs SkipScore
+        
+        
+       
+SkipScore
+	txa
+        cmp Num1
+        bcs SkipBar1
+        sta ENAM0
+        
+SkipBar1
+	cmp Num2
+        bcs SkipBar2
+        sta ENAM1
+SkipBar2
+; draw p1
 	txa		; X -> A
         sec		; set carry for subtract
-        sbc YPos	; local coordinate
+        sbc P1YPos	; local coordinate
         cmp #SpriteHeight ; in sprite?
-        bcc InSprite	; yes, skip over next
+        bcc InSprite1	; yes, skip over next
         lda #0		; not in sprite, load 0
-InSprite
+InSprite1
 	tay		; local coord -> Y
-; go to 2nd frame if timer is odd
+; go to 2nd frame if timer is multiple of 8
         lda MvTimer
-        lsr
-        lsr
-        lsr
+        and #8
+
         
-        bcc Frame1
+        beq P1Frame1
        
         tya 
         clc 
         adc #SpriteHeight
         tay
         
-Frame1
-        lda (FramePtr),y	; lookup color
-        sta WSYNC	; sync w/ scanline
+P1Frame1
+        lda (P1FramePtr),y	; lookup frame line
+       
         sta GRP0	; store bitmap
         
-; load/draw playfield
-        ldy PFCounter 
+  	jmp SkipP2     
+; draw p2
+	txa 
+        sec
+        sbc P2YPos
+        cmp #SpriteHeight
+        bcc InSprite2
+        lda #0		;use bottom clear row if not in sprite
         
-        jmp DrawPF
-        bne DrawPF
-; counter = 0 -> load new line
-	ldy PFIdx
-        iny ; increment index
-        sty PFIdx
-        lda PlayfieldData,y        
-        
-        
-        
-DrawPF
-	ldy PFIdx
-        ;lda PlayFieldData,
-        
-        
+InSprite2
+	tay
+        lda (P2FramePtr),y
+SkipP2
+        sta WSYNC	; sync w/ scanline
+        sta GRP1
         dex		; decrement X
+        
         bne LVScan	; repeat until 192 lines
 
 ; 29 lines of overscan
@@ -162,70 +223,126 @@ DivideLoop
 	rts		; return to caller
 
 ; Read joystick movement and apply to object 0
-MoveJoystick
+; y is 0 for p1, 1 for p2
+MoveJoystick subroutine
 ; Move vertically
 ; (up and down are actually reversed since ypos starts at bottom)
-	ldx YPos
-	lda #%00100000	;Up?
+	ldx P1YPos,y
+        tya
+        bne .P2Down
+        lda #%00100000	;Up?
+        jmp .DownDone
+.P2Down
+	lda #%00000010	;Up?
+.DownDone
 	bit SWCHA
-	bne SkipMoveUp
-        
+	bne .SkipMoveDown
      
+     	tya 	; addresses are 2 bytes, so offset needs to be doubled
+        asl
+        tay
        	lda #<FrameD0
-        sta FramePtr
+        sta P1FramePtr,y
         lda #>FrameD0 
-        sta FramePtr+1
+        sta P1FramePtr+1,y
+        tya 	; addresses are 2 bytes, so offset needs to be doubled
+        lsr
+        tay
+        
  
         ; stop on edges
-        cpx #2
-        bcc SkipMoveUp
+        cpx #15
+        bcc .SkipMoveDown
         dex
-SkipMoveUp
-
-	lda #%00010000	;Down?
+        dec Num1
+.SkipMoveDown
+; check up direction
+	tya
+        bne .P2Up
+        lda #%00010000	;Up?
+        jmp .UpDone
+.P2Up
+	lda #%00000001	;Up on p2 controller?
+.UpDone
 	bit SWCHA 
-	bne SkipMoveDown
+	bne .SkipMoveUp
+        
+        tya
+        asl	; multiply by 2 bytes
+        tay
         lda #<FrameU0
-        sta FramePtr
+        sta P1FramePtr,y
         lda #>FrameU0 
-        sta FramePtr+1
+        sta P1FramePtr+1,y
+        
+        tya
+        lsr	; divide by 2 so it normal again
+        tay
+        
         cpx #183
-        bcs SkipMoveDown
+        bcs .SkipMoveUp
         inx
-SkipMoveDown
-	stx YPos
+.SkipMoveUp
+	stx P1YPos,y
+        tya
+        bne .P2Left
+        lda #%01000000
+        jmp .LeftDone
+.P2Left
+	lda #%00000100
+.LeftDone
 ; Move horizontally
-        ldx XPos
-	lda #%01000000	;Left?
+        ldx P1XPos,y
 	bit SWCHA
-	bne SkipMoveLeft
-        lda #<FrameL0
-        sta FramePtr
-        lda #>FrameL0 
-        sta FramePtr+1
-        cpx #16
-        bcc SkipMoveLeft
-        dex
-SkipMoveLeft
-	lda #%10000000	;Right?
-	bit SWCHA 
-	bne SkipMoveRight
+	bne .SkipMoveLeft
         ; set frame
+        tya 	; addresses are 2 bytes, so offset needs to be doubled
+        asl
+        tay
+        lda #<FrameL0
+        sta P1FramePtr,y
+        lda #>FrameL0 
+        sta P1FramePtr+1,y
+        tya
+        lsr
+        tay
+        
+        cpx #16
+        bcc .SkipMoveLeft
+        dex
+.SkipMoveLeft
+	tya
+        bne .P2Right
+        lda #%10000000	;Right?
+        jmp .RightDone
+.P2Right
+	lda #%00001000	;Right?
+.RightDone	
+	bit SWCHA 
+	bne .SkipMoveRight
+        
+        ; set frame
+        tya
+        asl
+        tay
         lda #<FrameR0
-        sta FramePtr
+        sta P1FramePtr,y
         lda #>FrameR0 
-        sta FramePtr+1
+        sta P1FramePtr+1,y
+        tya
+        lsr
+        tay
         ; cap on edges
         cpx #153
-        bcs SkipMoveRight
+        bcs .SkipMoveRight
         inx
-SkipMoveRight
-	stx XPos
+.SkipMoveRight
+	stx P1XPos,y
 	rts
 
-;---Graphics Data from PlayerPal 2600---
-;---Graphics Data from PlayerPal 2600---
-        
+BCDBitmap	subroutine
+	
+	rts
 PlayfieldData  
 	.byte 2, #%11110000, #%11111111, #%11111111
         .byte 2, #%00110000, #%00000000, #%11000000
@@ -348,6 +465,19 @@ FrameL1
         .byte #%00011100;$1E
         .byte #%00111000;$1E
         .byte #%00000000;$1E
+        
+; Bitmap pattern for digits
+DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
+        .byte $EE,$AA,$AA,$AA,$EE
+        .byte $22,$22,$22,$22,$22
+        .byte $EE,$22,$EE,$88,$EE
+        .byte $EE,$22,$66,$22,$EE
+        .byte $AA,$AA,$EE,$22,$22
+        .byte $EE,$88,$EE,$22,$EE
+        .byte $EE,$88,$EE,$AA,$EE
+        .byte $EE,$22,$22,$22,$22
+        .byte $EE,$AA,$EE,$AA,$EE
+        .byte $EE,$AA,$EE,$22,$EE
 ;---End Graphics Data---
 
 
