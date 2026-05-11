@@ -22,7 +22,7 @@
 ;title/different maps/modes?
 ;;;;;;;;;;;;;;;;;
 
-SpriteHeight	equ 13 
+SpriteHeight	equ 14 
 LapsHeight	equ 192 - 10
 
 
@@ -77,6 +77,7 @@ Start
         sta COLUP0
         lda #$2F
         sta COLUP1
+        
         
         lda #$60
         sta P1Laps
@@ -173,9 +174,9 @@ Frame0Anim
         sta PF0
         sta PF1
         sta PF2
-        lda #$16
-        sta COLUBK
-        sta COLUPF
+        lda #$18
+        ;sta COLUBK
+        ;sta COLUPF
         lda #2
         sta CTRLPF
         
@@ -233,59 +234,69 @@ CopyLapLine
 ; draw the actual game
 FieldLoop
 
-	txa
-        and #7
-        bne NoFieldIncr
-        nop
-    	lda #3
-	adc PFCounter
-	sta PFCounter
-        
-NoFieldIncr
-	ldy PFCounter
-        
-        
-	lda (TrackPtr),y
-        sta PF0
-        iny
-      	lda (TrackPtr),y
-        sta PF1
-        iny
-        lda (TrackPtr),y
-        sta PF2
-        
-       
-        ; old: 46-57
-        
-
-; energy bars  
+; P1 energy bar
 	lda #0		; dont draw
         cpx P1Energy 	; is row < energy ?
         bcs SkipBar1
-        txa		; draw line
+        ;lda #3
+        txa		; draw dashed line
 SkipBar1
-	sta ENAM0
-        dex
-        sta WSYNC
+	sta ENAM0	; update if we draw line
+
+; P2 energy bar
         lda #0
 	cpx P2Energy	
         bcs SkipBar2
         txa
 SkipBar2
 	sta ENAM1	; draw missile (for the bar)
+
+; draw playfield/map
+       	txa		; height on the screen
+        and #7		
+        bne NoFieldIncr	; increment index every 8 pixels
+    	lda #3
+        clc
+	adc PFCounter	; add 3 bytes to go to the next index
+	sta PFCounter
+        
+NoFieldIncr
 	
+	ldy PFCounter 	; load current location in the playfield
+	lda (TrackPtr),y
+        pha		; put byte 0 onto the stack
+        iny
+      	lda (TrackPtr),y ; load the 2nd byte
+        iny
+        
+        sta WSYNC	; start the next line
+        dex
        
+        sta PF1		; set the 2nd byte we just loaded
+        lda (TrackPtr),y
+        sta PF2		; set the 3rd byte
+        pla 
+        sta PF0		; set byte 0 from the stack
+        
+; draw finish line
+	stx ENABL
+
+	
+DrawP1     
 ; draw p1
 	txa		; X -> A
         sec		; set carry for subtract
         sbc P1YPos	; local coordinate
+        lsr
         cmp #SpriteHeight ; in sprite?
         bcc InSprite1	; yes, skip over next
         lda #0		; not in sprite, load 0
 
 InSprite1
-	clc		; clear for addition
+	
+	;clc		; clear for addition (extra buffer is added instead to save the clock cycles)
         adc P1Anim	; add animation offset
+        
 	tay		; local coord + frame -> Y
         lda (P1FramePtr),y	; lookup frame line
        
@@ -295,17 +306,19 @@ InSprite1
 	txa 
         sec
         sbc P2YPos
+        lsr
         cmp #SpriteHeight
         bcc InSprite2
         lda #0		;use bottom clear row if not in sprite
         
 InSprite2
-	clc
+	;clc
         adc P2Anim
 	tay
-        lda (P2FramePtr),y
+        
 SkipP2
         sta WSYNC	; sync w/ scanline
+        lda (P2FramePtr),y
         sta GRP1
         dex		; decrement X
         
@@ -531,12 +544,16 @@ TrackData
         
 ;---Graphics Data from PlayerPal 2600---
 
+; if we interlace each animaiton frame so we can safe a shift operation, and not need
+; to use twice as much ROM
+; this is jank, and kinda anoying, but should work
 FrameU0
 	.byte #0
-       	.byte #%00000000;$1E
+        .byte #0
         .byte #%00000000;$1E
         .byte #%00000000;$1E
-        .byte #%00111110;$1E
+        .byte #%00011100;$1E
+        .byte #%00110110;$1E
         .byte #%01011101;$1E
         .byte #%01100011;$1E
         .byte #%01111111;$1E
@@ -545,10 +562,12 @@ FrameU0
         .byte #%00010100;$1E
         .byte #%00001000;$1E
         .byte #%00001000;$1E
+
+
 FrameU1
-	.byte #0
-       
-        .byte #%00001000;$1E
+	;.byte #0, 
+	.byte #0,    
+        .byte #%00001000
         .byte #%00010100;$1E
         .byte #%00010100;$1E
         .byte #%00110110;$1E
@@ -562,7 +581,8 @@ FrameU1
         .byte #%00001000;$1E
 FrameR0
 	.byte #0
-         .byte #%00000000;$1E
+        .byte #0
+        .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
@@ -576,7 +596,8 @@ FrameR0
         .byte #%00000000;$1E
 FrameR1
 	.byte #0
-       .byte #%00000000;$1E
+        .byte #0
+        .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
@@ -590,6 +611,7 @@ FrameR1
         .byte #%00000000;$1E
 FrameD0
 	.byte #0
+        .byte #0
         .byte #%00001000;$1E
         .byte #%00001000;$1E
         .byte #%00011100;$1E
@@ -604,6 +626,7 @@ FrameD0
         .byte #%00000000;$1E
 FrameD1
 	.byte #0
+        .byte #0
         .byte #%00001000;$1E
         .byte #%00001000;$1E
         .byte #%00011100;$1E
@@ -618,7 +641,8 @@ FrameD1
         .byte #%00001000;$1E
 FrameL0
 	.byte #0
-    .byte #%00000000;$1E
+        .byte #0
+    	.byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
@@ -632,7 +656,8 @@ FrameL0
         .byte #%00000000;$1E
 FrameL1
 	.byte #0
-       .byte #%00000000;$1E
+        .byte #0
+        .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
