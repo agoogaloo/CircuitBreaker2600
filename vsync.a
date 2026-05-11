@@ -1,24 +1,29 @@
-press
+
 	processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; [TODO] ;;;;;
+; map/backgound (with compression probably
+; shmoovement 
+;	signed velocity
+;	friction
+;	boosting/energy
 ;
-; We're going to set the player's coarse and fine position
-; at the same time using a clever method.
-; We divide the X coordinate by 15, in a loop that itself
-; is 15 cycles long. When the loop exits, we are at
-; the correct coarse position, and we set RESP0.
-; The accumulator holds the remainder, which we convert
-; into the fine position for the HMP0 register.
-; This logic is in a subroutine called SetHorizPos.
+; collision resolution
+;	split x/y axis
 ;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; game logic
+;	laps counter/detection
+;	timer
+
+;title/different maps/modes?
+;;;;;;;;;;;;;;;;;
 
 SpriteHeight	equ 13 
-ScoreHeight	equ 12
+LapsHeight	equ 192 - 10
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
@@ -33,13 +38,22 @@ P1YPos		.byte
 P2YPos		.byte
 P1FramePtr	.word
 P2FramePtr	.word
+P1Anim		.byte
+P2Anim		.byte
+P1Energy	.byte
+P2Energy	.byte
+
+
+P1Laps		.byte
+P2Laps		.byte
+LapsBuff	.ds 10
+Temp		.byte
+
 
 PFIdx		.byte
 PFCounter	.byte
 
-Num1		.byte
-Num2		.byte
-Bar1		.byte
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
@@ -53,13 +67,21 @@ Start
 ; player position/colours
         lda #80
         sta P1YPos
-        sta P1XPos
         sta P2YPos
+        lda #50
+        sta P1XPos
+        lda #100
         sta P2XPos
         lda #$1F
         sta COLUP0
         lda #$2F
         sta COLUP1
+        
+        lda #$60
+        sta P1Laps
+        lda #$06
+        sta P2Laps
+         
 ; sprite frames
         lda #<FrameU0
         sta P1FramePtr
@@ -68,10 +90,10 @@ Start
         sta P1FramePtr+1
         sta P2FramePtr+1
         
-        lda #200
-        sta Num1
-        lda #20
-        sta Num2
+        lda #50
+        sta P1Energy
+        lda #50
+        sta P2Energy
         
 ; vertical delay on p0 so they are both synced to the right scanline        
         lda #1
@@ -85,26 +107,41 @@ NextFrame
 	VERTICAL_SYNC
 ; 37 lines of underscan
 	TIMER_SETUP 37
+        
 ; move X and Y coordinates w/ joystick
 ; give player in y register
 	ldy #0
 	jsr MoveJoystick
         ldy #1
         jsr MoveJoystick
+; detect player collision
+	bit CXPPMM
+        bpl NoCollision
+        inc P1XPos
+        dec P2XPos
+        sta CXCLR
+NoCollision
         
 ; animation!
+	ldx #0		; p1 frame 0
+        ldy #0		; p1 frame 0
 	inc MvTimer
-	lda MvTimer
-
-; score board/timer display
-	jsr BCDBitmap
-       
+	lda MvTimer	; check if frame is multiple of 4
+        and #4
+        beq Frame0Anim		;switch frames
+        ldx #SpriteHeight 	; next frame
+        ldy #SpriteHeight	; next frame
+Frame0Anim
+	stx P1Anim
+        sty P2Anim
         
-; Background/playfield colours
-        lda #$c3
-        sta COLUBK
-        lda #$2f
-        sta COLUPF
+; update scoreboard bitmaps
+	lda P1Laps
+        ldx #0
+	jsr LapsBitmap
+        lda P2Laps
+        ldx #5
+        jsr LapsBitmap
         
 ; the next two scanlines
 ; position the player horizontally
@@ -114,45 +151,103 @@ NextFrame
         lda P2XPos	; get X coordinate
         ldx #1		; player 0
         jsr SetHorizPos	; set coarse offset
-        lda #30
+        lda #5
         ldx #2		;missle/energe bar pos
         jsr SetHorizPos
-         lda #32
+        lda #8
         ldx #3		;missle/energe bar pos
         jsr SetHorizPos
         sta WSYNC	; sync w/ scanline
         sta HMOVE	; apply fine offsets
         
+; setup for laps counter
+        lda #0
+        sta ENAM0
+        sta ENAM1
+        sta PF0
+        sta PF1
+        sta PF2
+        lda #$16
+        sta COLUBK
+        sta COLUPF
+        lda #2
+        sta CTRLPF
+        
 ; it's ok if we took an extra scanline because
 ; the PIA timer will always count 37 lines
 ; wait for end of underscan
         TIMER_WAIT
+        lda #0
+        sta VBLANK
+	
+       
 ; 192 lines of frame
 	ldx #192	; X = 192 scanlines
+        ldy 0
         
-LVScan
 ; drawing kernel
-; energy bars
+LapsLoop
 	
+        ;lsr		; double height
+        lda LapsBuff,y
+        sta PF1
+        
+        SLEEP 28
+        
+        lda LapsBuff+5,y
+        sta PF1
+        
+	dex
+        txa
+        and #1
+        bne CopyLapLine
+        iny
+CopyLapLine
+        
+        sta WSYNC
+        cpx #LapsHeight
+        bne LapsLoop
+ 
+	lda #$01
+        sta CTRLPF
+        lda #$c3
+        sta COLUBK
+        lda #$16
+        sta COLUPF 
+       ; dex 
+       ; sta WSYNC
+     
 
-; scoreboard
-	txa
-        cmp #ScoreHeight
-        ;bcs SkipScore
+; draw the actual game
+FieldLoop
+
         
+DrawField
+	lda PlayfieldData+1
+        sta PF0
+        lda PlayfieldData+2
+        sta PF1
+        lda PlayfieldData+3
+        sta PF2
         
-       
-SkipScore
-	txa
-        cmp Num1
+
+; energy bars  
+	lda #0		; dont draw
+        cpx P1Energy 	; is row < energy ?
         bcs SkipBar1
-        sta ENAM0
-        
+        txa		; draw line
 SkipBar1
-	cmp Num2
+	sta ENAM0
+        
+        lda #0
+	cpx P2Energy	
         bcs SkipBar2
-        sta ENAM1
+        txa
 SkipBar2
+	sta ENAM1	; draw missile (for the bar)
+        
+	dex
+        sta WSYNC
 ; draw p1
 	txa		; X -> A
         sec		; set carry for subtract
@@ -160,26 +255,15 @@ SkipBar2
         cmp #SpriteHeight ; in sprite?
         bcc InSprite1	; yes, skip over next
         lda #0		; not in sprite, load 0
-InSprite1
-	tay		; local coord -> Y
-; go to 2nd frame if timer is multiple of 8
-        lda MvTimer
-        and #8
 
-        
-        beq P1Frame1
-       
-        tya 
-        clc 
-        adc #SpriteHeight
-        tay
-        
-P1Frame1
+InSprite1
+	clc		; clear for addition
+        adc P1Anim	; add animation offset
+	tay		; local coord + frame -> Y
         lda (P1FramePtr),y	; lookup frame line
        
         sta GRP0	; store bitmap
-        
-  	jmp SkipP2     
+       
 ; draw p2
 	txa 
         sec
@@ -189,6 +273,8 @@ P1Frame1
         lda #0		;use bottom clear row if not in sprite
         
 InSprite2
+	clc
+        adc P2Anim
 	tay
         lda (P2FramePtr),y
 SkipP2
@@ -196,7 +282,7 @@ SkipP2
         sta GRP1
         dex		; decrement X
         
-        bne LVScan	; repeat until 192 lines
+        bne FieldLoop	; repeat until 192 lines
 
 ; 29 lines of overscan
 	TIMER_SETUP 29
@@ -204,23 +290,78 @@ SkipP2
 ; total = 262 lines, go to next frame
         jmp NextFrame
 
+
+; pre conditions: x=offset into array ,a=BCD number
+LapsBitmap	subroutine
+	
+	pha 		; push a for later
+        and #$0f 	; mask out 1st digit
+; multipluy by 5 to get location of bitmap
+        sta Temp
+        asl
+        asl
+        adc Temp
+        tay		; store in y
+        lda #5		
+        sta Temp	; loop through each row
+.digit1
+	lda DigitsBitmap,y
+        and #$0f	; get 1st digit
+        sta LapsBuff,x	; store it
+        inx
+        iny		;update counters
+        dec Temp
+       	bne .digit1
+; 2nd digit        
+        pla		; restore original value
+        lsr
+        lsr
+        lsr
+        lsr
+        sta Temp	; store 2nd digit * 4
+        asl
+        asl
+        adc Temp	
+        tay		; digit* 5 (bitmap offset) is in y
+        dex
+        dex		; restore x back to original value
+        dex
+        dex
+        dex
+        lda #5
+        sta Temp
+.digit2
+	lda DigitsBitmap,y
+        and #$F0	; take left digit
+	ora LapsBuff,x	; combine with 1st digit
+        sta LapsBuff,x	; store back
+        inx
+        iny		; update counters
+        dec Temp
+        bne .digit2
+        
+	rts
+
 ; SetHorizPos routine
 ; A = X coordinate
 ; X = player number (0 or 1)
-SetHorizPos
+SetHorizPos	subroutine
 	sta WSYNC	; start a new line
+        bit 0		; waste 3 cycles
 	sec		; set carry flag
 DivideLoop
 	sbc #15		; subtract 15
 	bcs DivideLoop	; branch until negative
-	eor #7		; calculate fine offset
+	eor #$7		; calculate fine offset
 	asl
 	asl
 	asl
 	asl
 	sta RESP0,x	; fix coarse position
+        ;lda #$80
 	sta HMP0,x	; set fine offset
 	rts		; return to caller
+
 
 ; Read joystick movement and apply to object 0
 ; y is 0 for p1, 1 for p2
@@ -254,7 +395,8 @@ MoveJoystick subroutine
         cpx #15
         bcc .SkipMoveDown
         dex
-        dec Num1
+        dec P1Energy
+        inc P2Energy
 .SkipMoveDown
 ; check up direction
 	tya
@@ -307,7 +449,7 @@ MoveJoystick subroutine
         lsr
         tay
         
-        cpx #16
+        cpx #1
         bcc .SkipMoveLeft
         dex
 .SkipMoveLeft
@@ -340,14 +482,14 @@ MoveJoystick subroutine
 	stx P1XPos,y
 	rts
 
-BCDBitmap	subroutine
-	
-	rts
+
+        
+        align #$100
 PlayfieldData  
-	.byte 2, #%11110000, #%11111111, #%11111111
-        .byte 2, #%00110000, #%00000000, #%11000000
-        .byte 88, #%00110000, #%00111111, #%11000000
-        .byte 2, #%00110000, #%00000000, #%11000000
+	.byte 2, #%10100000, #%11111111, #%01010100
+        .byte 4, #%00110000, #%00000000, #%11000000
+        .byte 80, #%00110000, #%00111111, #%11000000
+        .byte 4, #%00110000, #%00000000, #%11000000
         .byte 2, #%11110000, #%11111111, #%11111111
         .byte 0
 ;---Graphics Data from PlayerPal 2600---
