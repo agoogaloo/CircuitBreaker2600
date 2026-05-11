@@ -5,7 +5,8 @@
         include "xmacro.h"
 
 ;;;; [TODO] ;;;;;
-; map/backgound (with compression probably
+; map/backgound (with compression probably)
+; fix sprite drawing
 ; shmoovement 
 ;	signed velocity
 ;	friction
@@ -49,7 +50,7 @@ P2Laps		.byte
 LapsBuff	.ds 10
 Temp		.byte
 
-
+TrackPtr	.word
 PFIdx		.byte
 PFCounter	.byte
 
@@ -94,6 +95,11 @@ Start
         sta P1Energy
         lda #50
         sta P2Energy
+; track pointer
+	lda #<TrackData
+        sta TrackPtr
+        lda #>TrackData
+        sta TrackPtr+1
         
 ; vertical delay on p0 so they are both synced to the right scanline        
         lda #1
@@ -208,27 +214,48 @@ CopyLapLine
         cpx #LapsHeight
         bne LapsLoop
  
-	lda #$01
+ 	lda #0
+        sta PF1  
+        sta PFCounter
+        dex
+        sta WSYNC
+        lda #$01
         sta CTRLPF
         lda #$c3
         sta COLUBK
         lda #$16
         sta COLUPF 
-       ; dex 
-       ; sta WSYNC
-     
+        dex
+        sta WSYNC
+       
+      
 
 ; draw the actual game
 FieldLoop
 
+	txa
+        and #7
+        bne NoFieldIncr
+        nop
+    	lda #3
+	adc PFCounter
+	sta PFCounter
         
-DrawField
-	lda PlayfieldData+1
+NoFieldIncr
+	ldy PFCounter
+        
+        
+	lda (TrackPtr),y
         sta PF0
-        lda PlayfieldData+2
+        iny
+      	lda (TrackPtr),y
         sta PF1
-        lda PlayfieldData+3
+        iny
+        lda (TrackPtr),y
         sta PF2
+        
+       
+        ; old: 46-57
         
 
 ; energy bars  
@@ -238,16 +265,16 @@ DrawField
         txa		; draw line
 SkipBar1
 	sta ENAM0
-        
+        dex
+        sta WSYNC
         lda #0
 	cpx P2Energy	
         bcs SkipBar2
         txa
 SkipBar2
 	sta ENAM1	; draw missile (for the bar)
-        
-	dex
-        sta WSYNC
+	
+       
 ; draw p1
 	txa		; X -> A
         sec		; set carry for subtract
@@ -410,7 +437,7 @@ MoveJoystick subroutine
 	bne .SkipMoveUp
         
         tya
-        asl	; multiply by 2 bytes
+        asl		; multiply by 2 bytes
         tay
         lda #<FrameU0
         sta P1FramePtr,y
@@ -418,7 +445,7 @@ MoveJoystick subroutine
         sta P1FramePtr+1,y
         
         tya
-        lsr	; divide by 2 so it normal again
+        lsr		; divide by 2 so it normal again
         tay
         
         cpx #183
@@ -438,7 +465,7 @@ MoveJoystick subroutine
 	bit SWCHA
 	bne .SkipMoveLeft
         ; set frame
-        tya 	; addresses are 2 bytes, so offset needs to be doubled
+        tya 		; addresses are 2 bytes, so offset needs to be doubled
         asl
         tay
         lda #<FrameL0
@@ -455,10 +482,10 @@ MoveJoystick subroutine
 .SkipMoveLeft
 	tya
         bne .P2Right
-        lda #%10000000	;Right?
+        lda #%10000000		;Right?
         jmp .RightDone
 .P2Right
-	lda #%00001000	;Right?
+	lda #%00001000		;Right?
 .RightDone	
 	bit SWCHA 
 	bne .SkipMoveRight
@@ -485,13 +512,23 @@ MoveJoystick subroutine
 
         
         align #$100
-PlayfieldData  
-	.byte 2, #%10100000, #%11111111, #%01010100
-        .byte 4, #%00110000, #%00000000, #%11000000
-        .byte 80, #%00110000, #%00111111, #%11000000
-        .byte 4, #%00110000, #%00000000, #%11000000
-        .byte 2, #%11110000, #%11111111, #%11111111
-        .byte 0
+        
+TrackData
+        .byte #%11110000, #%11111111,#%11111111
+        .byte #%00010000, #%00000000,#%11110000
+        .byte #%00110000, #%00000000,#%00001110
+        .byte #%00010000, #%00000001,#%00000001
+        .byte #%00110000, #%00000010,#%00000000
+        .byte #%10110000, #%10000000,#%00000000
+        .byte #%00110000, #%00000000,#%00000000
+        .byte #%11110000, #%11111111,#%11111111
+
+	;.byte $FF,$FF,$FF,
+        ;.byte $FF,$FF,$FF,
+       ; .byte $30,$00,$00
+        
+ 
+        
 ;---Graphics Data from PlayerPal 2600---
 
 FrameU0
