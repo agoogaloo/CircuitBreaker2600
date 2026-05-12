@@ -1,12 +1,9 @@
-17
 	processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
 
 ;;;; [TODO] ;;;;;
-; map/backgound (with compression probably)
-; fix sprite drawing
 ; shmoovement 
 ;	signed velocity
 ;	friction
@@ -35,16 +32,26 @@ LapsHeight	equ 192 - 10
 	org $80
 
 MvTimer		.byte
-P1XPos		.byte
-P2XPos		.byte
-P1YPos		.byte
-P2YPos		.byte
+
+; movement
+P1PosX		.byte
+P1PosY		.byte
+P2PosX		.byte
+P2PosY		.byte
+
+P1VelX		.byte
+P1VelY		.byte
+P2VelX		.byte
+P2VelY		.byte
+
+P1Energy	.byte
+P2Energy	.byte
+
 P1FramePtr	.word
 P2FramePtr	.word
 P1Anim		.byte
 P2Anim		.byte
-P1Energy	.byte
-P2Energy	.byte
+
 
 
 P1Laps		.byte
@@ -53,7 +60,6 @@ LapsBuff	.ds 10
 Temp		.byte
 
 TrackPtr	.word
-PFIdx		.byte
 PFCounter	.byte
 
 
@@ -68,13 +74,13 @@ Start
 	CLEAN_START
 ; init
 ; player position/colours
-        lda #80
-        sta P1YPos
-        sta P2YPos
-        lda #50
-        sta P1XPos
+        lda #40
+        sta P1PosY
+        sta P2PosY
+        lda #60
+        sta P1PosX
         lda #100
-        sta P2XPos
+        sta P2PosX
         lda #$1F
         sta COLUP0
         lda #$5e
@@ -119,28 +125,23 @@ NextFrame
         
 ; move X and Y coordinates w/ joystick
 ; give player in y register
-	ldy #0
+	ldx #0
 	jsr MoveJoystick
-        ldy #1
+        ldx #2
         jsr MoveJoystick
-; detect player collision
-	bit CXPPMM
-        bpl NoCollision
-        inc P1XPos
-        dec P2XPos
-        sta CXCLR
-NoCollision
+        
+
+
         
 ; animation!
-
 	inc MvTimer
 	lda MvTimer	; check if frame is multiple of 4
-        and #1		; take lower 2 bits
-        bne NoFrameIncr		;next frame
-        lda 9	; offset between frames
+        and #1		; take 0th bit
+        bne NoFrameIncr	; next frame
+        lda #AnimOffset	; offset between animation frames
         clc		; may not be necissary, but just in case
         adc P1Anim
-        cmp EndAnimOffset
+        cmp #EndAnimOffset
         bcc NoResetAnim
         lda #0
 NoResetAnim
@@ -149,6 +150,27 @@ NoResetAnim
         ldx #SpriteHeight 	; next frame
         ldy #SpriteHeight	; next frame
 NoFrameIncr
+
+; apply velocity
+	
+;player/wall collision
+	lda MvTimer
+	ldy #0
+	jsr WallCollision
+        ;ldy #2
+        ;jsr WallCollision
+
+	
+	
+; player/player collision
+	bit CXPPMM
+        bpl NoCollision
+        inc P1PosX
+        dec P2PosX
+        
+NoCollision
+	sta CXCLR
+
 	
         
 ; update scoreboard bitmaps
@@ -161,10 +183,10 @@ NoFrameIncr
         
 ; the next two scanlines
 ; position the player horizontally
-	lda P1XPos	; get X coordinate
+	lda P1PosX	; get X coordinate
         ldx #0		; player 0
         jsr SetHorizPos	; set coarse offset
-        lda P2XPos	; get X coordinate
+        lda P2PosX	; get X coordinate
         ldx #1		; player 0
         jsr SetHorizPos	; set coarse offset
         lda #2
@@ -202,7 +224,7 @@ NoFrameIncr
        
 ; 192 lines of frame
 	ldx #192	; X = 192 scanlines
-        ldy 0
+        ldy #0
         
 ; drawing kernel
 LapsLoop
@@ -299,7 +321,7 @@ DrawP1
 ; draw p1
 	txa		; X -> A
         sec		; set carry for subtract
-        sbc P1YPos	; local coordinate
+        sbc P1PosY	; local coordinate
         lsr
         cmp #SpriteHeight ; in sprite?
         bcc InSprite1	; yes, skip over next
@@ -318,7 +340,7 @@ InSprite1
 ; draw p2
 	txa 
         sec
-        sbc P2YPos
+        sbc P2PosY
         lsr
         cmp #SpriteHeight
         bcc InSprite2
@@ -344,12 +366,63 @@ SkipP2
         jmp NextFrame
 
 
+; preconditions: 
+; a-> frame counter (x or y collision)
+; y-> playerNum (0/2) 
+; this might work, need to check with velocity stuff though
+WallCollision	subroutine       
+	and #1		; take last bit of frame#
+        sty Temp
+        clc		; add a and y to get offset of data
+        adc Temp
+        tay		; y now has offset of the axis we are resolving
+
+; move from velocity
+        lda P1VelX,y
+        	; divide (signed) velocity by 4
+
+	bmi .MinDivide
+       ; lsr
+        lsr
+        jmp .DoneDivide
+.MinDivide
+	lsr
+        ;lsr
+        ora #$80
+        ;adc #0 	; add carry back in so it gets rounded down 
+	
+.DoneDivide
+
+        clc
+        adc P1PosX,y
+        sta P1PosX,y
+        rts
+        
+; player/wall collision
+        cpy #0		; compare player num in y
+        bne .P2Reg	; check player number
+        bit CXP0FB	; get sprite/wall collision
+        bpl .NoWall	; no collision
+        jmp .RestoreVal	; restore movement from previous frame
+.P2Reg
+	bit CXP1FB
+        bpl .NoWall
+        
+.RestoreVal      
+        
+        ;ldx P1PrevX,y
+        ;stx P1PosX,y
+        
+        ;jmp .DoneWall
+.NoWall
+	rts
+
 ; pre conditions: x=offset into array ,a=BCD number
 LapsBitmap	subroutine
 	
 	pha 		; push a for later
         and #$0f 	; mask out 1st digit
-; multipluy by 5 to get location of bitmap
+; multiply by 5 to get location of bitmap
         sta Temp
         asl
         asl
@@ -417,69 +490,51 @@ DivideLoop
 
 
 ; Read joystick movement and apply to object 0
-; y is 0 for p1, 1 for p2
+; x is 0 for p1, 2 for p2
 MoveJoystick subroutine
 ; Move vertically
-; (up and down are actually reversed since ypos starts at bottom)
-	ldx P1YPos,y
-        tya
-        bne .P2Down
-        lda #%00100000	;Up?
+        txa
+        bne .P2Down	; use p2 bitmask
+        lda #%00100000	; else, use p1 bitmask
         jmp .DownDone
 .P2Down
-	lda #%00000010	;Up?
+	lda #%00000010	
 .DownDone
-	bit SWCHA
-	bne .SkipMoveDown
+	bit SWCHA	; pressed?
+	bne .SkipMoveDown	; if not, skip moving down
      
-     	tya 	; addresses are 2 bytes, so offset needs to be doubled
-        asl
-        tay
-       	lda #<FrameD0
-        sta P1FramePtr,y
+       	lda #<FrameD0	; change frame
+        sta P1FramePtr,x
         lda #>FrameD0 
-        sta P1FramePtr+1,y
-        tya 	; addresses are 2 bytes, so offset needs to be doubled
-        lsr
-        tay
+        sta P1FramePtr+1,x
         
- 
-        ; stop on edges
-        cpx #15
-        bcc .SkipMoveDown
-        dex
+        dec P1VelY,x	; subract from velocity
+        ; just for testing
         dec P1Energy
         inc P2Energy
 .SkipMoveDown
+
 ; check up direction
-	tya
+	txa
         bne .P2Up
-        lda #%00010000	;Up?
+        lda #%00010000	;Up
         jmp .UpDone
 .P2Up
-	lda #%00000001	;Up on p2 controller?
+	lda #%00000001	;Up on p2 controller
 .UpDone
 	bit SWCHA 
 	bne .SkipMoveUp
         
-        tya
-        asl		; multiply by 2 bytes
-        tay
         lda #<FrameU0
-        sta P1FramePtr,y
+        sta P1FramePtr,x
         lda #>FrameU0 
-        sta P1FramePtr+1,y
+        sta P1FramePtr+1,x
         
-        tya
-        lsr		; divide by 2 so it normal again
-        tay
-        
-        cpx #183
-        bcs .SkipMoveUp
-        inx
+       	inc P1VelY,x
 .SkipMoveUp
-	stx P1YPos,y
-        tya
+
+; check left
+        txa
         bne .P2Left
         lda #%01000000
         jmp .LeftDone
@@ -487,28 +542,19 @@ MoveJoystick subroutine
 	lda #%00000100
 .LeftDone
 ; Move horizontally
-        ldx P1XPos,y
 	bit SWCHA
 	bne .SkipMoveLeft
         ; set frame
-        tya 		; addresses are 2 bytes, so offset needs to be doubled
-        asl
-        tay
         lda #<FrameL0
-        sta P1FramePtr,y
+        sta P1FramePtr,x
         lda #>FrameL0 
-        sta P1FramePtr+1,y
-        tya
-        lsr
-        tay
-        
-        cpx #1
-        bcc .SkipMoveLeft
-        dex
+        sta P1FramePtr+1,x
+        dec P1VelX,x
 .SkipMoveLeft
-	tya
+
+	txa
         bne .P2Right
-        lda #%10000000		;Right?
+        lda #%10000000		
         jmp .RightDone
 .P2Right
 	lda #%00001000		;Right?
@@ -517,22 +563,19 @@ MoveJoystick subroutine
 	bne .SkipMoveRight
         
         ; set frame
-        tya
-        asl
-        tay
         lda #<FrameR0
-        sta P1FramePtr,y
+        sta P1FramePtr,x
         lda #>FrameR0 
-        sta P1FramePtr+1,y
+        sta P1FramePtr+1,x
         tya
         lsr
         tay
         ; cap on edges
         cpx #153
         bcs .SkipMoveRight
-        inx
+        inc P1VelX,x
 .SkipMoveRight
-	stx P1XPos,y
+
 	rts
 
 
