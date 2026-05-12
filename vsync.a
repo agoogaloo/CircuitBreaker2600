@@ -1,4 +1,4 @@
-
+17
 	processor 6502
         include "vcs.h"
         include "macro.h"
@@ -22,7 +22,9 @@
 ;title/different maps/modes?
 ;;;;;;;;;;;;;;;;;
 
-SpriteHeight	equ 14 
+SpriteHeight	equ 9
+AnimOffset	equ 9
+EndAnimOffset	equ 32
 LapsHeight	equ 192 - 10
 
 
@@ -79,9 +81,9 @@ Start
         sta COLUP1
         
         
-        lda #$60
+        lda #$62
         sta P1Laps
-        lda #$06
+        lda #$17
         sta P2Laps
          
 ; sprite frames
@@ -130,17 +132,24 @@ NextFrame
 NoCollision
         
 ; animation!
-	ldx #0		; p1 frame 0
-        ldy #0		; p1 frame 0
+
 	inc MvTimer
 	lda MvTimer	; check if frame is multiple of 4
-        and #4
-        beq Frame0Anim		;switch frames
+        and #1		; take lower 2 bits
+        bne NoFrameIncr		;next frame
+        lda 9	; offset between frames
+        clc		; may not be necissary, but just in case
+        adc P1Anim
+        cmp EndAnimOffset
+        bcc NoResetAnim
+        lda #0
+NoResetAnim
+        sta P1Anim
+        sta P2Anim
         ldx #SpriteHeight 	; next frame
         ldy #SpriteHeight	; next frame
-Frame0Anim
-	stx P1Anim
-        sty P2Anim
+NoFrameIncr
+	
         
 ; update scoreboard bitmaps
 	lda P1Laps
@@ -159,10 +168,13 @@ Frame0Anim
         ldx #1		; player 0
         jsr SetHorizPos	; set coarse offset
         lda #5
-        ldx #2		;missle/energe bar pos
+        ldx #2		; missle/energy bar pos
         jsr SetHorizPos
         lda #8
-        ldx #3		;missle/energe bar pos
+        ldx #3		; missle/energy bar pos
+        jsr SetHorizPos
+        lda #80
+        ldx #4		; missle/energy bar pos
         jsr SetHorizPos
         sta WSYNC	; sync w/ scanline
         sta HMOVE	; apply fine offsets
@@ -174,8 +186,8 @@ Frame0Anim
         sta PF0
         sta PF1
         sta PF2
-        lda #$18
-        ;sta COLUBK
+        lda #$d0
+        sta COLUBK
         ;sta COLUPF
         lda #2
         sta CTRLPF
@@ -224,7 +236,7 @@ CopyLapLine
         sta CTRLPF
         lda #$c3
         sta COLUBK
-        lda #$16
+        lda #$D8
         sta COLUPF 
         dex
         sta WSYNC
@@ -548,44 +560,45 @@ TrackData
 ; to use twice as much ROM
 ; this is jank, and kinda anoying, but should work
 FrameU0
-	.byte #0
-        .byte #0
+	.byte #0,#0
         .byte #%00000000;$1E
         .byte #%00000000;$1E
-        .byte #%00011100;$1E
-        .byte #%00110110;$1E
+        .byte #%00100010;$1E
+        .byte #%01110111;$1E
+        .byte #%01010101;$1E
+        .byte #%00010100;$1E
+        .byte #%00001000;$1E
+
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00000000;$1E
+        .byte #%00101010;$1E
+        .byte #%01110111;$1E
         .byte #%01011101;$1E
-        .byte #%01100011;$1E
+        .byte #%00010100;$1E
+        .byte #%00001000;$1E
+
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00001000;$1E
+        .byte #%00111110;$1E
         .byte #%01111111;$1E
         .byte #%01010101;$1E
         .byte #%00010100;$1E
-        .byte #%00010100;$1E
-        .byte #%00001000;$1E
         .byte #%00001000;$1E
 
-
-FrameU1
-	;.byte #0, 
-	.byte #0,    
-        .byte #%00001000
-        .byte #%00010100;$1E
+	.byte #0,#0
+        .byte #%00001000;$1E
         .byte #%00010100;$1E
         .byte #%00110110;$1E
-        .byte #%01011101;$1E
-        .byte #%01100011;$1E
         .byte #%01111111;$1E
-        .byte #%01010101;$1E
-        .byte #%00010100;$1E
+        .byte #%01011101;$1E
         .byte #%00010100;$1E
         .byte #%00001000;$1E
-        .byte #%00001000;$1E
+
 FrameR0
-	.byte #0
-        .byte #0
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
+
+	.byte #0,#0
         .byte #%00011100;$1E
         .byte #%00111000;$1E
         .byte #%00111110;$1E
@@ -593,59 +606,73 @@ FrameR0
         .byte #%00100110;$1E
         .byte #%00111000;$1E
         .byte #%00011100;$1E
-        .byte #%00000000;$1E
-FrameR1
-	.byte #0
-        .byte #0
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
+
+	.byte #0,#0
+	.byte #%00011100;$1E
+        .byte #%00111000;$1E
+        .byte #%00111110;$1E
+        .byte #%11110001;$1E
+        .byte #%00100110;$1E
+        .byte #%00111000;$1E
+        .byte #%00011100;$1E
+
+	.byte #0,#0
+	.byte #%00011100;$1E
+        .byte #%00111000;$1E
+        .byte #%01111110;$1E
+        .byte #%11110011;$1E
+        .byte #%01100110;$1E
+        .byte #%00111000;$1E
+        .byte #%00011100;$1E
+	.byte #0,#0
         .byte #%00011100;$1E
         .byte #%00111000;$1E
         .byte #%01111110;$1E
-        .byte #%10110011;$1E
-        .byte #%01101110;$1E
+        .byte #%10110001;$1E
+        .byte #%01100110;$1E
         .byte #%00111000;$1E
         .byte #%00011100;$1E
-        .byte #%00000000;$1E
 FrameD0
-	.byte #0
-        .byte #0
-        .byte #%00001000;$1E
+Frame0
+	.byte #0,#0
         .byte #%00001000;$1E
         .byte #%00011100;$1E
-        .byte #%00010100;$1E
         .byte #%01010101;$1E
         .byte #%01110111;$1E
-        .byte #%01111111;$1E
-        .byte #%01111111;$1E
         .byte #%00111110;$1E
         .byte #%00000000;$1E
         .byte #%00000000;$1E
-        .byte #%00000000;$1E
-FrameD1
-	.byte #0
-        .byte #0
+Frame1
+	.byte #0,#0
         .byte #%00001000;$1E
-        .byte #%00001000;$1E
-        .byte #%00011100;$1E
         .byte #%00010100;$1E
         .byte #%01010101;$1E
         .byte #%01110111;$1E
-        .byte #%01111111;$1E
-        .byte #%01111111;$1E
+        .byte #%00111110;$1E
+        .byte #%00001000;$1E
+        .byte #%00000000;$1E
+Frame2
+	.byte #0,#0
+        .byte #%00001000;$1E
+        .byte #%00011100;$1E
+        .byte #%01010101;$1E
+        .byte #%01110111;$1E
+        .byte #%00111110;$1E
+        .byte #%00011100;$1E
+        .byte #%00001000;$1E
+Frame3
+	.byte #0,#0
+        .byte #%00001000;$1E
+        .byte #%00010100;$1E
+        .byte #%01010101;$1E
+        .byte #%01110111;$1E
         .byte #%00111110;$1E
         .byte #%00010100;$1E
-        .byte #%00010100;$1E
         .byte #%00001000;$1E
+
+
 FrameL0
-	.byte #0
-        .byte #0
-    	.byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
+	.byte #0,#0
         .byte #%00111000;$1E
         .byte #%00011100;$1E
         .byte #%01111100;$1E
@@ -653,22 +680,34 @@ FrameL0
         .byte #%01100100;$1E
         .byte #%00011100;$1E
         .byte #%00111000;$1E
-        .byte #%00000000;$1E
-FrameL1
-	.byte #0
-        .byte #0
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
-        .byte #%00000000;$1E
+
+	.byte #0,#0
+        .byte #%00111000;$1E
+        .byte #%00011100;$1E
+        .byte #%01111100;$1E
+        .byte #%10001111;$1E
+        .byte #%01100100;$1E
+        .byte #%00011100;$1E
+        .byte #%00111000;$1E
+
+        .byte #0,#0
+	 .byte #%00111000;$1E
+        .byte #%00011100;$1E
+        .byte #%01111110;$1E
+        .byte #%11001111;$1E
+        .byte #%01100110;$1E
+        .byte #%00011100;$1E
+        .byte #%00111000;$1E
+	.byte #0,#0
         .byte #%00111000;$1E
         .byte #%00011100;$1E
         .byte #%01111110;$1E
-        .byte #%11001101;$1E
-        .byte #%01110110;$1E
+        .byte #%10001101;$1E
+        .byte #%01100110;$1E
         .byte #%00011100;$1E
         .byte #%00111000;$1E
-        .byte #%00000000;$1E
+        
+
         
 ; Bitmap pattern for digits
 DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
