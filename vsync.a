@@ -5,12 +5,11 @@
 
 ;;;; [TODO] ;;;;;
 ; shmoovement
-;	fractional position?
-;	
-;	friction
-;	boosting/energy
+; [ ]	fractional position?	
+; [ ]	friction
+; [ ]	boosting/energy
 ;
-; collision resolution
+; [X] collision resolution
 ;
 ; game logic
 ;	laps counter/detection
@@ -25,6 +24,7 @@ EndAnimOffset	equ 32
 LapsHeight	equ 192 - 10
 
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
 
@@ -33,21 +33,32 @@ LapsHeight	equ 192 - 10
 
 MvTimer		.byte
 
+
 ; movement
-P1PrevX		.byte
-P1PrevY		.byte
-P2PrevX		.byte
-P2PrevY		.byte
+P1PrevPos	.word
+P2PrevPos	.word
 
 P1PosX		.byte
 P1PosY		.byte
 P2PosX		.byte
 P2PosY		.byte
 
+; fractional position for fixed point
+P1PosFX		.byte
+P1PosFY		.byte
+P2PosFX		.byte
+P2PosFY		.byte
+
 P1VelX		.byte
 P1VelY		.byte
 P2VelX		.byte
 P2VelY		.byte
+
+; fractional velocity for fixed point
+P1VelFX		.byte
+P1VelFY		.byte
+P2VelFX		.byte
+P2VelFY		.byte
 
 P1Energy	.byte
 P2Energy	.byte
@@ -164,18 +175,11 @@ NoFrameIncr
 	jsr WallCollision
         lda MvTimer
         ldy #2
-        ;jsr WallCollision
+        jsr WallCollision
 
 	
-	
-; player/player collision
-	bit CXPPMM
-        bpl NoCollision
-        inc P1PosX
-        dec P2PosX
-        
-NoCollision
-	sta CXCLR
+
+	sta CXCLR	; reset collision flags after we finish all collisions
 
 	
         
@@ -400,7 +404,7 @@ WallCollision	subroutine
 .DoneDivide
 	sta Temp	; save to temp for later
         lda P1PosX,y	; save previous position before moving
-        sta P1PrevX,y
+        sta P1PrevPos,y
         
         clc		; add velocity/2 to position
         adc Temp
@@ -426,7 +430,9 @@ WallCollision	subroutine
         
         lda #0
         sta P1VelX,y	; stop velocity
-        lda P1PrevX,y
+        lda #$80	; set fractional to 0.5 for rounding reasons
+        sta P1VelFX,y
+        lda P1PrevPos,y
         sta P1PosX,y
         
         ; TODO reset position
@@ -508,8 +514,10 @@ DivideLoop
 
 ; Read joystick movement and apply to object 0
 ; x is 0 for p1, 2 for p2
+; if needed this could be split into x/y per frame like movement
 MoveJoystick subroutine
 ; Move vertically
+	ldy P1VelFY,x
         txa
         bne .P2Down	; use p2 bitmask
         lda #%00100000	; else, use p1 bitmask
@@ -519,16 +527,24 @@ MoveJoystick subroutine
 .DownDone
 	bit SWCHA	; pressed?
 	bne .SkipMoveDown	; if not, skip moving down
+        ; just for testing
+        dec P1Energy
+        inc P2Energy
      
        	lda #<FrameD0	; change frame
         sta P1FramePtr,x
         lda #>FrameD0 
         sta P1FramePtr+1,x
         
-        dec P1VelY,x	; subract from velocity
-        ; just for testing
-        dec P1Energy
-        inc P2Energy
+        ; subtract velocity
+        tya
+        sec
+        sbc #16
+        tay
+        bcs .SkipMoveDown
+        dec P1VelY,x
+      
+        
 .SkipMoveDown
 
 ; check up direction
@@ -542,14 +558,24 @@ MoveJoystick subroutine
 	bit SWCHA 
 	bne .SkipMoveUp
         
-        lda #<FrameU0
+        lda #<FrameU0	;set animation
         sta P1FramePtr,x
         lda #>FrameU0 
         sta P1FramePtr+1,x
         
-       	inc P1VelY,x
+       	; add to fractional velocity
+        tya
+        clc
+        adc #16
+        tay
+        bcc .SkipMoveUp
+        inc P1VelY,x
+        
 .SkipMoveUp
+	sty P1VelFY,x
 
+; horizontal velocity
+	ldy P1VelFX,x
 ; check left
         txa
         bne .P2Left
@@ -561,14 +587,22 @@ MoveJoystick subroutine
 ; Move horizontally
 	bit SWCHA
 	bne .SkipMoveLeft
-        ; set frame
+; set frame
         lda #<FrameL0
         sta P1FramePtr,x
         lda #>FrameL0 
         sta P1FramePtr+1,x
+; subtract
+	tya
+        sec
+        sbc #16
+        tay
+        bcs .SkipMoveLeft
         dec P1VelX,x
+       	
 .SkipMoveLeft
 
+; get right input
 	txa
         bne .P2Right
         lda #%10000000		
@@ -584,22 +618,48 @@ MoveJoystick subroutine
         sta P1FramePtr,x
         lda #>FrameR0 
         sta P1FramePtr+1,x
+; add to fractional velocity
         tya
-        lsr
+        clc
+        adc #16
         tay
-        ; cap on edges
-        cpx #153
-        bcs .SkipMoveRight
+        bcc .SkipMoveRight
         inc P1VelX,x
+        
 .SkipMoveRight
-
+	sty P1VelFX,x
 	rts
 
 
         
       
    
-TrackData
+
+TrackData        	
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11100000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%11110000
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11111111,%11111111
+
+TrackData2
  	.byte %11110000,%11111111, %11111111
 	.byte %11110000,%10000000, %00000000
 	.byte %01110000,%00000000, %00000000
