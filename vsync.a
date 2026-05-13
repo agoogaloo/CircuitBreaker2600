@@ -12,7 +12,7 @@
 ; [X] collision resolution
 ;
 ; game logic
-; [ ]	laps counter/detection
+; [X]	laps counter/detection
 ; [ ]	timer
 
 ;title/different maps/modes?
@@ -30,8 +30,14 @@ LapsHeight	equ 192 - 10
 
         seg.u Variables
 	org $80
-
-MvTimer		.byte
+        
+; game state
+; 0-> racing
+; 1-> countdown
+; 2-> p1 win
+; 3-> p2 win
+State		.byte
+Timer		.word
 
 
 ; movement
@@ -85,7 +91,6 @@ TrackPtr	.word
 PFCounter	.byte
 
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Code segment
 
@@ -93,6 +98,7 @@ PFCounter	.byte
         org $f000
 
 Start
+Reset
 	CLEAN_START
 ; init
 ; player position/colours
@@ -108,10 +114,9 @@ Start
         lda #$5e
         sta COLUP1
         
-        
-        lda #$62
+; lap counter
+        lda #$3
         sta P1Laps
-        lda #$17
         sta P2Laps
          
 ; sprite frames
@@ -135,6 +140,10 @@ Start
 ; vertical delay on p0 so they are both synced to the right scanline        
         lda #1
         sta VDELP0
+        lda #0
+        sta State
+        
+        
         
 ; main loop
 NextFrame
@@ -144,20 +153,47 @@ NextFrame
 	VERTICAL_SYNC
 ; 37 lines of underscan
 	TIMER_SETUP 37
+; check state, and update accordingly
+        lda State
+        beq RaceUpdate
+        cmp #2
+        beq P1WinUpdate
+        cmp #3
+        beq P2WinUpdate
         
+; game update for win screens  
+P1WinUpdate
+P2WinUpdate
+	bit INPT4	; reset if either button is pushed
+        bpl Reset
+        bit INPT5
+        bpl Reset
+        jmp EndUpdate
+        
+
+
+
+
+	jmp EndUpdate
+
+; game update for in a race
+RaceUpdate
 ; move X and Y coordinates w/ joystick
-; give player in y register
+; give player in x register
 	ldx #0
 	jsr MoveJoystick
         ldx #2
         jsr MoveJoystick
         
 
-
-        
 ; animation!
-	inc MvTimer
-	lda MvTimer	; check if frame is multiple of 4
+	inc Timer	; global timer
+        bne NoTimerCarry
+        inc Timer+1
+NoTimerCarry
+        
+        
+	lda Timer	; check if frame is multiple of 4
         and #1		; take 0th bit
         bne NoFrameIncr	; next frame
         lda #AnimOffset	; offset between animation frames
@@ -174,10 +210,10 @@ NoResetAnim
 NoFrameIncr
 
 ; apply velocity/collision
-	lda MvTimer
+	lda Timer
 	ldy #0
 	jsr WallCollision
-        lda MvTimer
+        lda Timer
         ldy #2
         jsr WallCollision
 
@@ -185,14 +221,12 @@ NoFrameIncr
 	bit CXP0FB
         bvc NoP1Lap
         ldx #0
-        ldy #1
         jsr CheckLaps
 NoP1Lap
 
 	bit CXP1FB
         bvc NoP2Lap
         ldx #2
-        ldy #2
         jsr CheckLaps
 NoP2Lap
 
@@ -204,6 +238,7 @@ NoP2Lap
         
 ; update scoreboard bitmaps
 	lda P1Laps
+        
         ldx #0
 	jsr LapsBitmap
         lda P2Laps
@@ -218,10 +253,10 @@ NoP2Lap
         lda P2PosX	; get X coordinate
         ldx #1		; player 0
         jsr SetHorizPos	; set coarse offset
-        lda #2
-        ldx #2		; missle/energy bar pos
+        lda #4
+        ldx #2		; missile/energy bar pos
         jsr SetHorizPos
-        lda #159
+        lda #161 - 4
         ldx #3		; missle/energy bar pos
         jsr SetHorizPos
         lda #80
@@ -229,7 +264,8 @@ NoP2Lap
         jsr SetHorizPos
         sta WSYNC	; sync w/ scanline
         sta HMOVE	; apply fine offsets
-        
+     
+EndUpdate
 ; setup for laps counter
         lda #0
         sta ENAM0
@@ -243,6 +279,7 @@ NoP2Lap
         lda #2
         sta CTRLPF
         
+
 ; it's ok if we took an extra scanline because
 ; the PIA timer will always count 37 lines
 ; wait for end of underscan
@@ -406,26 +443,43 @@ CheckLaps	subroutine
         
         beq .Return	; last touch was also on top, don't count 
         sed		;set decimal mode for changing laps
-        lda P1Laps,x
+        lda P1Laps,x	; decrement lap counter
         sbc #1
         sta P1Laps,x
+; TODO: Win
         
-        cld		; decrement lap counter
-	lda #0		; done in BCD mode
+        cld		
+	lda #0		
         sta P1LapLoc,x
         rts
 .BotLine
 	lda P1LapLoc,x	
         bne .Return	; last touch was also on top, don't count 
         sed
-        lda P1Laps,x
+        lda P1Laps,x	; decrement lap counter
         sbc #0		; we already brnached from the carry, so we dont need to clear it
-        sta P1Laps,x
-        
-        cld		; decrement lap counter
-	lda #1		; need to do this the long way because BCD
+        sta P1Laps,x	; need to do this the long way because BCD
+        cld
+        beq .WinGame
+; TODO: Win
+
+        		
+	lda #1		; store 1 to indicate side we touched
         sta P1LapLoc,x
 .Return
+	rts
+.WinGame
+	txa
+        lsr		; convert to 2/3 for player 1/2 win
+        ora #2
+        sta State	; win state!
+        lda Timer+1	; record time
+        sta P1Laps
+        lda Timer
+        sta P2Laps
+        lda #0
+        sta Timer
+        sta Timer+1
 	rts
         
         
@@ -912,7 +966,43 @@ DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
         .byte $EE,$22,$22,$22,$22
         .byte $EE,$AA,$EE,$AA,$EE
         .byte $EE,$AA,$EE,$22,$EE
-;---End Graphics Data---
+;letters
+     .byte #%01000100;--
+        .byte #%10101010;--
+        .byte #%10101010;--
+        .byte #%11101110;--
+        .byte #%10101010;--
+
+        .byte #%11001100;--
+        .byte #%10101010;--
+        .byte #%11001100;--
+        .byte #%10101010;--
+        .byte #%11001100;--
+
+        .byte #%01100110;--
+        .byte #%10001000;--
+        .byte #%10001000;--
+        .byte #%10001000;--
+        .byte #%01100110;--
+
+        .byte #%11001100;--
+        .byte #%10101010;--
+        .byte #%10101010;--
+        .byte #%10101010;--
+        .byte #%11001100;--
+
+        .byte #%11101110;--
+        .byte #%10001000;--
+        .byte #%11001100;--
+        .byte #%10001000;--
+        .byte #%11101110;--
+
+        .byte #%11101110;--
+        .byte #%10001000;--
+        .byte #%11001100;--
+        .byte #%10001000;--
+        .byte #%10001000;--
+
 
 
 
