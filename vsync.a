@@ -1,26 +1,26 @@
-	processor 6502
+50	processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
 
 ;;;; [TODO] ;;;;;
 ; shmoovement
-; [ ]	fractional position?	
+; [X]	fractional position?	
 ; [ ]	friction
 ; [ ]	boosting/energy
 ;
 ; [X] collision resolution
 ;
 ; game logic
-;	laps counter/detection
-;	timer
+; [ ]	laps counter/detection
+; [ ]	timer
 
 ;title/different maps/modes?
 ;;;;;;;;;;;;;;;;;
 
 SpriteHeight	equ 9
 AnimOffset	equ 9
-EndAnimOffset	equ 32
+EndAnimOffset	equ 35
 LapsHeight	equ 192 - 10
 
 
@@ -60,19 +60,25 @@ P1VelFY		.byte
 P2VelFX		.byte
 P2VelFY		.byte
 
+; not used yet
 P1Energy	.byte
 P2Energy	.byte
 
+; sprite/animation
 P1FramePtr	.word
 P2FramePtr	.word
 P1Anim		.byte
 P2Anim		.byte
 
-
-
+; laps
 P1Laps		.byte
+P1LapLoc	.byte	
 P2Laps		.byte
+P2LapLoc	.byte
+
+; scoreboard buffer
 LapsBuff	.ds 10
+
 Temp		.byte
 
 TrackPtr	.word
@@ -167,15 +173,28 @@ NoResetAnim
         ldy #SpriteHeight	; next frame
 NoFrameIncr
 
-; apply velocity
-	
-;player/wall collision
+; apply velocity/collision
 	lda MvTimer
 	ldy #0
 	jsr WallCollision
         lda MvTimer
         ldy #2
         jsr WallCollision
+
+; finish line triggers
+	bit CXP0FB
+        bvc NoP1Lap
+        ldx #0
+        ldy #1
+        jsr CheckLaps
+NoP1Lap
+
+	bit CXP1FB
+        bvc NoP2Lap
+        ldx #2
+        ldy #2
+        jsr CheckLaps
+NoP2Lap
 
 	
 
@@ -375,12 +394,45 @@ SkipP2
 ; total = 262 lines, go to next frame
         jmp NextFrame
 
+; update laps when lap line is hit
+; preconditions: 
+; x-> playerNum (0/2)
 
+CheckLaps	subroutine
+	lda P1PosY,x	; get y position
+        cmp #192/2 
+        bcc .BotLine	; if negative we're on the Bottom
+       	lda P1LapLoc,x	
+        
+        beq .Return	; last touch was also on top, don't count 
+        sed		;set decimal mode for changing laps
+        lda P1Laps,x
+        sbc #1
+        sta P1Laps,x
+        
+        cld		; decrement lap counter
+	lda #0		; done in BCD mode
+        sta P1LapLoc,x
+        rts
+.BotLine
+	lda P1LapLoc,x	
+        bne .Return	; last touch was also on top, don't count 
+        sed
+        lda P1Laps,x
+        sbc #0		; we already brnached from the carry, so we dont need to clear it
+        sta P1Laps,x
+        
+        cld		; decrement lap counter
+	lda #1		; need to do this the long way because BCD
+        sta P1LapLoc,x
+.Return
+	rts
+        
+        
 ; preconditions: 
 ; a-> frame counter (x or y collision)
 ; on even, move x, check y for collision from last frame
 ; y-> playerNum (0/2) 
-; this might work, need to check with velocity stuff though
 WallCollision	subroutine       
 	and #1		; take last bit of frame#
         sty Temp
@@ -388,10 +440,7 @@ WallCollision	subroutine
         adc Temp
         tay		; y now has offset of the axis we are resolving
 
-; move from velocity
-; TODO: Use more precision
-	
-      
+; move position based on velocity      
         clc		; clear carry for addition
         lda P1VelFX,y	
         adc P1PosFX,y	; add fractional parts 
@@ -401,13 +450,10 @@ WallCollision	subroutine
         sta P1PrevPos,y	;store initial position in case of collision
         adc P1VelX,y
         sta P1PosX,y
-        
-       
 
         
 ; player/wall collision
-; this operated on the axis fom last frame, not this frame
-	
+; this operates on the axis fom last frame, not this frame
         cpy #2		; compare player num in y
         bcs .P2Reg	; check player number
         bit CXP0FB	; get sprite/wall collision
@@ -419,17 +465,16 @@ WallCollision	subroutine
         
 .RestoreVal
 	tya
-        eor #1		; flip x/y bit because we are checking collisoin from last frame
+        eor #1		; flip x/y bit because we are checking collision from last frame
         tay
         
         lda #0
         sta P1VelX,y	; stop velocity
-        ;lda #$80	; set fractional to 0.5 for rounding reasons
         sta P1VelFX,y
-        lda P1PrevPos,y
+       
+        lda P1PrevPos,y	; reset position 
         sta P1PosX,y
         
-        ; TODO reset position
        
 .NoWall
 	rts
@@ -625,12 +670,9 @@ MoveJoystick subroutine
 	rts
 
 
-        
-      
-   
 
 	align #$100   	; make address aligned or it takes too long to look up    
-;---Graphics Data from PlayerPal 2600---
+;Animations
 FrameU0
 	.byte #0,#0
         .byte #%00000000;$1E
@@ -781,7 +823,7 @@ FrameL0
         .byte #%00011100;$1E
         .byte #%00111000;$1E
         
-
+; Tracks
 TrackData        	
 	.byte %11110000,%11111111,%11111111
 	.byte %11110000,%11111111,%11111111
