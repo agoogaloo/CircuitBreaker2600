@@ -4,13 +4,13 @@
         include "xmacro.h"
 
 ;;;; [TODO] ;;;;;
-; shmoovement 
-;	signed velocity
+; shmoovement
+;	fractional position?
+;	
 ;	friction
 ;	boosting/energy
 ;
 ; collision resolution
-;	split x/y axis
 ;
 ; game logic
 ;	laps counter/detection
@@ -34,6 +34,11 @@ LapsHeight	equ 192 - 10
 MvTimer		.byte
 
 ; movement
+P1PrevX		.byte
+P1PrevY		.byte
+P2PrevX		.byte
+P2PrevY		.byte
+
 P1PosX		.byte
 P1PosY		.byte
 P2PosX		.byte
@@ -157,7 +162,8 @@ NoFrameIncr
 	lda MvTimer
 	ldy #0
 	jsr WallCollision
-        ;ldy #2
+        lda MvTimer
+        ldy #2
         ;jsr WallCollision
 
 	
@@ -368,6 +374,7 @@ SkipP2
 
 ; preconditions: 
 ; a-> frame counter (x or y collision)
+; on even, move x, check y for collision from last frame
 ; y-> playerNum (0/2) 
 ; this might work, need to check with velocity stuff though
 WallCollision	subroutine       
@@ -378,29 +385,33 @@ WallCollision	subroutine
         tay		; y now has offset of the axis we are resolving
 
 ; move from velocity
+; TODO: Use more precision
         lda P1VelX,y
-        	; divide (signed) velocity by 4
-
+        	; divide (signed) velocity by 2
 	bmi .MinDivide
-       ; lsr
         lsr
+       
         jmp .DoneDivide
 .MinDivide
 	lsr
-        ;lsr
         ora #$80
-        ;adc #0 	; add carry back in so it gets rounded down 
+        adc #0 	; add carry back in so it gets rounded down 
 	
 .DoneDivide
-
-        clc
-        adc P1PosX,y
-        sta P1PosX,y
-        rts
+	sta Temp	; save to temp for later
+        lda P1PosX,y	; save previous position before moving
+        sta P1PrevX,y
+        
+        clc		; add velocity/2 to position
+        adc Temp
+        sta P1PosX,y	; save
+        
         
 ; player/wall collision
-        cpy #0		; compare player num in y
-        bne .P2Reg	; check player number
+; this operated on the axis fom last frame, not this frame
+	
+        cpy #2		; compare player num in y
+        bcs .P2Reg	; check player number
         bit CXP0FB	; get sprite/wall collision
         bpl .NoWall	; no collision
         jmp .RestoreVal	; restore movement from previous frame
@@ -408,12 +419,18 @@ WallCollision	subroutine
 	bit CXP1FB
         bpl .NoWall
         
-.RestoreVal      
+.RestoreVal
+	tya
+        eor #1		; flip x/y bit because we are checking collisoin from last frame
+        tay
         
-        ;ldx P1PrevX,y
-        ;stx P1PosX,y
+        lda #0
+        sta P1VelX,y	; stop velocity
+        lda P1PrevX,y
+        sta P1PosX,y
         
-        ;jmp .DoneWall
+        ; TODO reset position
+       
 .NoWall
 	rts
 
