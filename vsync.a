@@ -93,7 +93,7 @@ P2LapLoc	.byte
 LapsBuff	.ds 10
 
 
-
+Temp2		.byte	; the movement code (and maybe other stuff later) needs another random byte
 TrackPtr	.word
 
 
@@ -122,7 +122,7 @@ Reset
         sta COLUP1
         
 ; lap counter
-        lda #$15
+        lda #$5
         sta P1Laps
         sta P2Laps
          
@@ -134,7 +134,7 @@ Reset
         sta P1FramePtr+1
         sta P2FramePtr+1
         
-        lda #100
+        lda #170
         sta P1Energy
         sta P2Energy
         
@@ -182,35 +182,45 @@ P2WinUpdate
 ;;;;; -[Race Update]- ;;;;
 RaceUpdate
 
-; animation!
+; timer updates
 	inc Timer	; global timer
         bne NoTimerCarry
         inc Timer+1
 NoTimerCarry
         
-        
+; animation!
+; could probably be condesed for more ROM space if needed
 	lda Timer	; check if frame is multiple of 4
         and #1		; take 0th bit
-        bne NoFrameIncr	; next frame
+        bne P2AnimIncr	; next frame
         lda #AnimOffset	; offset between animation frames
-        clc		; may not be necissary, but just in case
+        clc		
         adc P1Anim
         cmp #EndBoostAnim
-        bcc NoResetAnim
+        bcc P1NoResetAnim
         lda #0
-NoResetAnim
+P1NoResetAnim
         sta P1Anim
+        jmp DoneAnimIncr 
+        
+P2AnimIncr
+	
+	lda #AnimOffset	; offset between animation frames
+        clc		
+        adc P2Anim
+        cmp #EndBoostAnim
+        bcc P2NoResetAnim
+        lda #0
+P2NoResetAnim
         sta P2Anim
-        ldx #SpriteHeight 	; next frame
-        ldy #SpriteHeight	; next frame
-NoFrameIncr
+DoneAnimIncr
 
 ; move X and Y coordinates w/ joystick
 ; give player in x register
 	ldx #0
 	jsr MoveJoystick
         ldx #2
-        jsr MoveJoystick
+        ;jsr MoveJoystick
         
 ; apply velocity/collision
 	lda Timer
@@ -333,7 +343,6 @@ CopyLapLine
         sta WSYNC
        
       
-
 ; draw the actual game
 FieldLoop
 
@@ -341,8 +350,8 @@ FieldLoop
 	lda #0		; dont draw
         cpx P1Energy 	; is row < energy ?
         bcs SkipBar1
-        ;lda #3
-        txa		; draw dashed line
+        lda #3
+        ;txa		; draw dashed line
 SkipBar1
 	sta ENAM0	; update if we draw line
 
@@ -437,7 +446,6 @@ SkipP2
 ; update laps when lap line is hit
 ; preconditions: 
 ; x-> playerNum (0/2)
-
 CheckLaps	subroutine
 	lda P1PosY,x	; get y position
         cmp #192/2 
@@ -449,9 +457,9 @@ CheckLaps	subroutine
         lda P1Laps,x	; decrement lap counter
         sbc #1
         sta P1Laps,x
-; TODO: Win
         
-        cld		
+        cld
+        beq .WinGame
 	lda #0		
         sta P1LapLoc,x
         rts
@@ -464,7 +472,6 @@ CheckLaps	subroutine
         sta P1Laps,x	; need to do this the long way because BCD
         cld
         beq .WinGame
-; TODO: Win
 
         		
 	lda #1		; store 1 to indicate side we touched
@@ -608,43 +615,113 @@ DivideLoop
 	rts		; return to caller
 
 
-; Read joystick movement and apply to object 0
+; Read joystick movement/boost and apply to 
 ; x is 0 for p1, 2 for p2
-; if needed this could be split into x/y per frame like movement
-MoveJoystick 
-	txa 
-        bne P2Boost
-        bit INPT4
+; this could be split by axis per frame like movement if more time is needed
+; (could also just stop useing indirect addressing for everythihg)
+MoveJoystick	subroutine
+
+; Find which axis has larger motion
+; this whole thing basically just does if(abs(x)>abs(y))
+; take absolute value for yvelocity
+        lda P1VelY,x
+        bpl .PositiveY	; y velocity is already positive
+        lda #$ff
+        sec
+        sbc P1VelY,x	; 0 - P1Vel
+        sta Temp	; store in Temp
+        lda #0
+        sec 
+        sbc P1VelFY,x 	; apply to fractional component too
+        sta Temp2 
+        jmp .DoneAbsY
+.PositiveY
+	sta Temp
+        lda P1VelFY,x
+        sta Temp2
+.DoneAbsY
+
+; absolute val for X velocity
+        lda P1VelX,x
+        bpl .PositiveX	; y velocity is already positive
+        lda #$0
+        sec
+        sbc P1VelFX,x	; 0 - P1Vel
+        tay		; store in y register
+        lda #$ff		; do whole component last so it ends in a register
+        sec 
+        sbc P1VelX,x 	; apply to fractional component too
+        ;sta Temp2 
+        jmp .DoneAbsX
+.PositiveX
+        lda P1VelFX,x
+        tay
+        lda P1VelX,x
+.DoneAbsX
+; now Temp = abs(velY) whole, Temp2 = abs(velY) fraction
+; a = abs(velX) whole, y = abs(velX) fraction
+        
+        cmp Temp	; compare whole components
+        bcc .BigYVel	; whole compoent of y is bigger
+        bne .BigXVel	; not equal -> whole of X is bigger
+        tya		
+        cmp Temp2	; whole compoent was equal -> check fractions
+        bcc .BigYVel	; fraction of y is bigger
+        bne .BigXVel	; not equal -> fraction of X is bigger
+        jmp .DoneVelCheck
+.BigYVel
+	nop
+        jmp .DoneVelCheck
+.BigXVel
+	nop
+.DoneVelCheck
+
+
+        
+; boost input
+; stores the speed in Temp
+	txa 		; check player number
+        bne P2Boost	
+        bit INPT4	; check p1 boost input
         bpl .boost
         jmp .NoBoost
 P2Boost
-	bit INPT5
+	bit INPT5	; checl p2 boost input
         bpl .boost
         jmp .NoBoost
 	
-.boost  
-	dec P1Energy,x
-	lda #BoostAccel 
+.boost  		; do the boost
+	lda P1Energy,x
+        beq .NoBoost	; no energy left :(
+        sec
+	sbc #2		; consume 2 boost meter
+        sta P1Energy,x
+	lda #BoostAccel ; store acceleration in Temp
         sta Temp
         jmp .EndBoost
-; boost/normal accel
-.NoBoost
+
+.NoBoost		; don't boost
 	lda #NormAccel ; store normal acceleration
         sta Temp
-        ; stop at a lower max animation frame
-        lda #EndAnim
+        		 
+        lda #EndAnim	; only do the 1st 2 frames of animation
         cmp P1Anim,x	
-        bcs .NoAnimReset
-        lda #0
+        bcs .NoAnimReset; don't need to reset
+        lda #0		; go back to frame 1
         sta P1Anim,x
 .NoAnimReset
-       
 .EndBoost
-; Move vertically
-	ldy P1VelFY,x
+
+
+
+	
+       
+; modify velocity from inputs       
+; y axis:
+	ldy P1VelFY,x	; store fractional yVel in y register
         txa
-        bne .P2Down	; use p2 bitmask
-        lda #%00100000	; else, use p1 bitmask
+        bne .P2Down	; use p2 bitmask/velocity
+        lda #%00100000	; else, use p1 bitmask        
         jmp .DownDone
 .P2Down
 	lda #%00000010	
@@ -657,13 +734,13 @@ P2Boost
         lda #>FrameD0 
         sta P1FramePtr+1,x
         
-        ; subtract velocity
+        ; subtract Temp from fractional velocity
         tya
         sec
         sbc Temp
         tay
         bcs .SkipMoveDown
-        dec P1VelY,x
+        dec P1VelY,x	; apply to whole velocity if it overflowed
       
         
 .SkipMoveDown
@@ -684,7 +761,7 @@ P2Boost
         lda #>FrameU0 
         sta P1FramePtr+1,x
         
-       	; add to fractional velocity
+       	; add Temp to fractional velocity
         tya
         clc
         adc Temp
@@ -693,7 +770,18 @@ P2Boost
         inc P1VelY,x
         
 .SkipMoveUp
-	sty P1VelFY,x
+	tya
+	cmp P1VelFY,x
+        beq .NoChangeY	; check if we acually moved in y axis
+	sta P1VelFY,x	; update value
+; check for drift
+	;lda P1VelFX,x	; compare x/y velocity 
+        ;bmi .NoChangeY
+        ;inc P1Energy,x
+        
+        
+.NoChangeY   
+        
 
 ; horizontal velocity
 	ldy P1VelFX,x
@@ -751,9 +839,23 @@ P2Boost
 	sty P1VelFX,x
 	rts
 
-
-
-	align #$100   	; make address aligned or it takes too long to look up    
+; preconditions:
+; Temp2 = #$FF
+; a = Value to get abs
+; negative flag set correctly
+AbsVal	subroutine
+	; Find which axis has larger motion
+        bpl .PositiveY	; y velocity is already positive
+        eor Temp2
+        clc
+        adc #1
+        lda #0
+        sec		; 0 - yVel to get the absolute value		
+        sbc P1VelY,x
+.PositiveY
+        rts
+        
+	align #$100   	; make address aligned or it takes too long to look up   
 ;Animations
 FrameU0
 	.byte #0,#0
