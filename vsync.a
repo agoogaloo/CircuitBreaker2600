@@ -1,4 +1,4 @@
-50	processor 6502
+E50	processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
@@ -7,7 +7,7 @@
 ; shmoovement
 ; [X]	fractional position?	
 ; [ ]	friction
-; [ ]	boosting/energy
+; [X]	boosting/energy
 ;
 ; [X] collision resolution
 ;
@@ -30,7 +30,6 @@ BoostAccel	equ 30
 MaxEnergy	equ 175
 
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
 
@@ -42,6 +41,7 @@ MaxEnergy	equ 175
 ; 1-> countdown
 ; 2-> p1 win
 ; 3-> p2 win
+; 4-> Game Select
 State		.byte
 Timer		.word
 
@@ -78,12 +78,15 @@ Temp		.byte	; used for various things
 P2Energy	.byte
 
 ; sprite/animation
-P1FramePtr	.word
-P2FramePtr	.word
+P1AnimOffset	.byte	; offset of the animation from the start of the animation page
+P1FrameOffset	.byte 	; total offset of the current frame (animOffset + frame offset)
+P2AnimOffset	.byte
+P2FrameOffset	.byte
 
-P1Anim		.byte
+
+P1AnimFrame	.byte	; frame with respect to the animation start (offset * frameNum)
 PFCounter	.byte	; why did I decide to space players apart by 2 bytes...
-P2Anim		.byte
+P2AnimFrame	.byte
 
 ; laps
 P1Laps		.byte
@@ -97,6 +100,9 @@ LapsBuff	.ds 10
 
 Temp2		.byte	; the movement code (and maybe other stuff later) needs another random byte
 TrackPtr	.word
+FinishTop	.byte
+FinishBot	.byte
+GameMode	.byte
 
 
 
@@ -107,16 +113,20 @@ TrackPtr	.word
         org $f000
 
 Start
-Reset
+
 	CLEAN_START
 ; init
+
+
+Reset
 ; player position/colours
-        lda #40
+        lda #8
         sta P1PosY
+        lda #18
         sta P2PosY
-        lda #60
+        lda #85
         sta P1PosX
-        lda #100
+       
         sta P2PosX
         lda #$1F
         sta COLUP0
@@ -129,22 +139,30 @@ Reset
         sta P2Laps
          
 ; sprite frames
-        lda #<FrameU0
-        sta P1FramePtr
-	sta P2FramePtr
-        lda #>FrameU0
-        sta P1FramePtr+1
-        sta P2FramePtr+1
+        lda #FrameL0-AnimationStart
+        sta P1AnimOffset
+	sta P2AnimOffset
+
+        sta P1AnimFrame
+	sta P2AnimFrame
+
         
         lda #MaxEnergy
         sta P1Energy
         sta P2Energy
         
 ; track pointer
-	lda #<TrackData
+	lda #<TrackData3
         sta TrackPtr
-        lda #>TrackData
+        lda #>TrackData3
         sta TrackPtr+1
+        ldy #(3*23)	; offset total bytes of level dta to find finish line heights
+        lda (TrackPtr),y
+        sta FinishTop
+        iny
+        lda (TrackPtr),y
+        sta FinishBot
+
         
 ; vertical delay on p0 so they are both synced to the right scanline        
         lda #1
@@ -156,8 +174,13 @@ Reset
         
 ; main loop
 NextFrame
-        lsr SWCHB	; test Game Reset switch
+	lda SWCHB
+        lsr
         bcc Start	; reset?
+        lsr
+        bcs NoGameSelect; game select
+        jmp Reset
+NoGameSelect
 ; 1 + 3 lines of VSYNC
 	VERTICAL_SYNC
 ; 37 lines of underscan
@@ -165,21 +188,9 @@ NextFrame
 ; check state, and update accordingly
         lda State
         beq RaceUpdate
-        cmp #2
-        beq P1WinUpdate
-        cmp #3
-        beq P2WinUpdate
-        
-;;;;; -[Win Screen Update]- ;;;;;       
-P1WinUpdate
-P2WinUpdate
-	bit INPT4	; reset if either button is pushed
-        bpl Reset
-        bit INPT5
-        bpl Reset
+        jsr NonRaceUpdate
         jmp EndUpdate
-
-
+        
 
 ;;;;; -[Race Update]- ;;;;
 RaceUpdate
@@ -192,29 +203,30 @@ NoTimerCarry
         
 ; animation!
 ; could probably be condesed for more ROM space if needed
+; this only loops boost anim, not boosting caps frame seperately
 	lda Timer	; check if frame is multiple of 4
         and #1		; take 0th bit
-        bne P2AnimIncr	; next frame
+        bne P2AnimFrameIncr	; next frame
         lda #AnimOffset	; offset between animation frames
         clc		
-        adc P1Anim
+        adc P1AnimFrame
         cmp #EndBoostAnim
         bcc P1NoResetAnim
         lda #0
 P1NoResetAnim
-        sta P1Anim
+        sta P1AnimFrame
         jmp DoneAnimIncr 
         
-P2AnimIncr
+P2AnimFrameIncr
 	
 	lda #AnimOffset	; offset between animation frames
         clc		
-        adc P2Anim
+        adc P2AnimFrame
         cmp #EndBoostAnim
         bcc P2NoResetAnim
         lda #0
 P2NoResetAnim
-        sta P2Anim
+        sta P2AnimFrame
 DoneAnimIncr
 
 ; move X and Y coordinates w/ joystick
@@ -224,6 +236,17 @@ DoneAnimIncr
         ldx #2
         jsr MoveJoystick
         
+; set frame offsets  
+	lda P1AnimFrame
+	clc
+        adc P1AnimOffset
+        sta P1FrameOffset
+        
+        lda P2AnimFrame
+	clc
+        adc P2AnimOffset
+        sta P2FrameOffset
+
 ; apply velocity/collision
 	lda Timer
 	ldy #0
@@ -285,6 +308,7 @@ EndUpdate
         lda #0
         sta ENAM0
         sta ENAM1
+        sta ENABL
         sta PF0
         sta PF1
         sta PF2
@@ -352,21 +376,32 @@ FieldLoop
 	lda #0		; dont draw
         cpx P1Energy 	; is row < energy ?
         bcs SkipBar1
-        lda #3
-        ;txa		; draw dashed line
+        ;lda #3
+        txa		; draw dashed line
 SkipBar1
 	sta ENAM0	; update if we draw line
 
 ; P2 energy bar
-        lda #0
+        ;lda #0
 	cpx P2Energy	
         bcs SkipBar2
         txa
 SkipBar2
 	sta ENAM1	; draw missile (for the bar)
+        
+; draw finish line
+	cpx FinishBot
+        bcc DrawFinish
+        cpx FinishTop
+        bcs DrawFinish
+        jmp FinishEnd
+DrawFinish
+	stx ENABL
+FinishEnd
+	
 
 ; draw playfield/map
-       	txa		; height on the screen
+       	txa		; height on the screen already in a to save 2 cycles
         and #7		
         bne NoFieldIncr	; increment index every 8 pixels
     	lda #3
@@ -374,27 +409,22 @@ SkipBar2
 	adc PFCounter	; add 3 bytes to go to the next index
 	sta PFCounter
         
-NoFieldIncr
-	
+NoFieldIncr        
+        
 	ldy PFCounter 	; load current location in the playfield
 	lda (TrackPtr),y
-        pha		; put byte 0 onto the stack
-        iny
-      	lda (TrackPtr),y ; load the 2nd byte
-        iny
-        
+
         sta WSYNC	; start the next line
+        iny
         dex
-        
+       	sta PF0		; set byte 0 (loaded before WSYNC
+        lda (TrackPtr),y ; load the 2nd byte
+        iny
        
         sta PF1		; set the 2nd byte we just loaded
         lda (TrackPtr),y
-        sta PF2		; set the 3rd byte
-        pla 
-        sta PF0		; set byte 0 from the stack
+        sta PF2		; set the 3rd byte        
         
-; draw finish line
-	stx ENABL
 
 	
 DrawP1     
@@ -410,11 +440,9 @@ DrawP1
 InSprite1
 	
 	;clc		; clear for addition (extra buffer is added instead to save the clock cycles)
-        adc P1Anim	; add animation offset
-        
+        adc P1FrameOffset	; add animation offset
 	tay		; local coord + frame -> Y
-        lda (P1FramePtr),y	; lookup frame line
-       
+        lda AnimationStart,y	; lookup frame line
         sta GRP0	; store bitmap
        
 ; draw p2
@@ -428,12 +456,12 @@ InSprite1
         
 InSprite2
 	;clc
-        adc P2Anim
+        adc P2FrameOffset
 	tay
         
 SkipP2
         sta WSYNC	; sync w/ scanline
-        lda (P2FramePtr),y
+        lda AnimationStart,y
         sta GRP1
         dex		; decrement X
         
@@ -441,17 +469,51 @@ SkipP2
 
 ; 29 lines of overscan
 	TIMER_SETUP 29
+        lda #0
+        sta ENAM0
+        sta ENAM1
         TIMER_WAIT
 ; total = 262 lines, go to next frame
         jmp NextFrame
+
+;;;;; -[subroutines]- ;;;;;
+
+; update for game select, countdown, win screen, etc.
+NonRaceUpdate	subroutine
+	 cmp #1
+        beq .CountDown
+        cmp #2
+        beq .P1Win
+        cmp #3
+        beq .P2Win
+        cmp #4
+        beq .GameSelect
+        
+;;;;; -[Game Mode Select]- ;;;;;
+.GameSelect
+	
+;;;;; -[Countdown Update]- ;;;;;
+.CountDown
+
+;;;;; -[Win Screen Update]- ;;;;;       
+.P1Win
+.P2Win
+	bit INPT4	; reset if either button is pushed
+        ;bpl Reset
+        bit INPT5
+        ;bpl Reset
+        jmp EndUpdate
+
+
+	rts
 
 ; update laps when lap line is hit
 ; preconditions: 
 ; x-> playerNum (0/2)
 CheckLaps	subroutine
 	lda P1PosY,x	; get y position
-        cmp #192/2 
-        bcc .BotLine	; if negative we're on the Bottom
+        cmp #56		; check bottom line
+        bcc .BotLine	; below 
        	lda P1LapLoc,x	
         
         beq .Return	; last touch was also on top, don't count 
@@ -470,7 +532,7 @@ CheckLaps	subroutine
         bne .Return	; last touch was also on top, don't count 
         sed
         lda P1Laps,x	; decrement lap counter
-        sbc #0		; we already brnached from the carry, so we dont need to clear it
+        sbc #0		; we already branched from the carry, so we dont need to clear it
         sta P1Laps,x	; need to do this the long way because BCD
         cld
         beq .WinGame
@@ -682,7 +744,7 @@ MoveJoystick	subroutine
 .DoneVelCheck
 	; 100..0 = y bigger, 01..00 = x bigger
 	sta Temp2 ; store indicator in Temp2
-        sta P1Laps,x
+        ;sta P1Laps,x
 
 
 
@@ -714,10 +776,10 @@ P2Boost
         sta Temp
         		 
         lda #EndAnim	; only do the 1st 2 frames of animation
-        cmp P1Anim,x	
+        cmp P1AnimFrame,x	
         bcs .NoAnimReset; don't need to reset
         lda #0		; go back to frame 1
-        sta P1Anim,x
+        sta P1AnimFrame,x
 .NoAnimReset
 .EndBoost
 
@@ -738,10 +800,9 @@ P2Boost
 	bit SWCHA	; pressed?
 	bne .SkipMoveDown	; if not, skip moving down
      
-       	lda #<FrameD0	; change frame
-        sta P1FramePtr,x
-        lda #>FrameD0 
-        sta P1FramePtr+1,x
+            ; set frame
+        lda #FrameD0-AnimationStart
+        sta P1AnimOffset,x
         
         ; subtract Temp from fractional velocity
         tya
@@ -765,10 +826,9 @@ P2Boost
 	bit SWCHA 
 	bne .SkipMoveUp
         
-        lda #<FrameU0	;set animation
-        sta P1FramePtr,x
-        lda #>FrameU0 
-        sta P1FramePtr+1,x
+             ; set frame
+        lda #FrameU0-AnimationStart
+        sta P1AnimOffset,x
         
        	; add Temp to fractional velocity
         tya
@@ -811,10 +871,9 @@ P2Boost
 	bit SWCHA
 	bne .SkipMoveLeft
 ; set frame
-        lda #<FrameL0
-        sta P1FramePtr,x
-        lda #>FrameL0 
-        sta P1FramePtr+1,x
+             ; set frame
+        lda #FrameL0-AnimationStart
+        sta P1AnimOffset,x
 ; subtract
 	tya
         sec
@@ -837,10 +896,9 @@ P2Boost
 	bne .SkipMoveRight
         
         ; set frame
-        lda #<FrameR0
-        sta P1FramePtr,x
-        lda #>FrameR0 
-        sta P1FramePtr+1,x
+        lda #FrameR0-AnimationStart
+        sta P1AnimOffset,x
+        
 ; add to fractional velocity
         tya
         clc
@@ -884,6 +942,7 @@ AbsVal	subroutine
         
 	align #$100   	; make address aligned or it takes too long to look up   
 ;Animations
+AnimationStart
 FrameU0
 	.byte #0,#0
         .byte #%00000000;$1E
@@ -1035,85 +1094,6 @@ FrameL0
         .byte #%00011100;$1E
         .byte #%00111000;$1E
 ;---End Graphics Data---
-
-        
-; Tracks
-TrackData        	
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11100000,%00000000
-	.byte %11110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%11110000
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %11110000,%00000000,%00000000
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11111111,%11111111
-
-TrackData2
- 	.byte %11110000,%11111111, %11111111
-	.byte %11110000,%10000000, %00000000
-	.byte %01110000,%00000000, %00000000
-	.byte %0110000,%00000000, %00000000
-	.byte %00110000,%00000011, %00011111
-	.byte %00110000,%00001111, %00111111
-	.byte %00110000,%00111111, %11111111
-	.byte %00110000,%01111111, %11111111
-	.byte %00110000,%01111111, %11111111
-	.byte %00110000,%01111111, %11111111
-	.byte %00110000,%00111111, %11111111
-	.byte %00110000,%00000000, %11111110
-	.byte %00110000,%00000000, %11111000
-	.byte %00110000,%00000000, %11110000
-	.byte %00110000,%01111110, %00000000
-	.byte %00110000,%01111111, %00000000
-	.byte %00110000,%00111100, %00000000
-	.byte %00110000,%00000000, %00000000
-	.byte %00110000,%00000000, %00000000
-	.byte %00110000,%00000000, %11110000
-	.byte %00110000,%00000000, %11111100
-	.byte %01110000,%00000000, %11111110
-	.byte %11110000,%11111111, %11111111
-
-TrackData1
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %00110000,%00001111,%00001111
-	.byte %00110000,%00011111,%10000111
-	.byte %00110000,%00011111,%11100011
-	.byte %00110000,%00011111,%11110001
-	.byte %00110000,%00000000,%11111000
-	.byte %01110000,%00000000,%11111100
-	.byte %01110000,%00000001,%11111111
-	.byte %00110000,%00000011,%11111111
-	.byte %00110000,%00011111,%00111111
-	.byte %00110000,%00111111,%00001111
-	.byte %00110000,%00111111,%00000011
-	.byte %00110000,%00111111,%00000001
-	.byte %00110000,%00011111,%00000000
-	.byte %00110000,%00000000,%11000000
-	.byte %01110000,%00000000,%11100000
-	.byte %11110000,%00000000,%11110000
-	.byte %11110000,%11111111,%11111111
-        .byte %00110000,%00011111,%11100011
-
-        
- 
 ; Bitmap pattern for digits
 DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
         .byte $EE,$AA,$AA,$AA,$EE
@@ -1163,6 +1143,102 @@ DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
         .byte #%10001000;--
         .byte #%10001000;--
 
+     	.align #$100   
+; Tracks
+TrackData        	
+	
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%10000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00001111,%11111111
+	.byte %00110000,%00011111,%11111111
+	.byte %00110000,%00011111,%11111111
+	.byte %00110000,%00011111,%11111111
+	.byte %00110000,%00011111,%11111111
+	.byte %00110000,%00011111,%11111111
+	.byte %00110000,%00001111,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %11110000,%10000000,%00000000
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%11111111,%11111111
+        .byte #120,#60	; bounds for finish line
+
+
+
+
+TrackData1
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %00110000,%00000011,%00000000
+	.byte %00110000,%00001111,%00000000
+	.byte %00110000,%00011110,%11100000
+	.byte %00110000,%00011000,%11111000
+	.byte %00110000,%00000000,%11111100
+	.byte %00110000,%00000000,%11111110
+	.byte %00110000,%00000001,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00011111,%00011111
+	.byte %00110000,%00011111,%00000111
+	.byte %00110000,%00011111,%00000011
+	.byte %00110000,%00011111,%00000001
+	.byte %00110000,%00001110,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%11100000
+	.byte %01110000,%00000000,%11110000
+	.byte %11110000,%11111111,%11111111
+        .byte #120,#60	; bounds for finish line
+
+TrackData3
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11111111,%00000000
+	.byte %11110000,%11100000,%00000000
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%11000001,%11111111
+	.byte %11110000,%11000000,%11110000
+	.byte %11110000,%11000000,%10000000
+	.byte %11110000,%11100000,%00000000
+	.byte %11110000,%11111000,%00000000
+	.byte %11110000,%11111111,%00000011
+	.byte %11110000,%11111111,%00000001
+	.byte %11110000,%11111000,%00000000
+	.byte %11110000,%11000000,%00000000
+	.byte %01110000,%00000000,%11000000
+	.byte %00110000,%00000000,%11111100
+	.byte %00110000,%00000001,%11111111
+	.byte %00110000,%00000011,%11111111
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %11110000,%10000000,%00000000
+	.byte %11110000,%11111111,%11111111
+        .byte #124, #60	; bounds for finish line
+
+
+
+
+
+
+
+
+
+
+        
+ 
+
 
 
 
@@ -1175,3 +1251,4 @@ DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
 	org $fffc
         .word Start	; reset vector
         .word Start	; BRK vector
+
