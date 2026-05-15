@@ -29,6 +29,12 @@ BoostAccel	equ 30
 
 MaxEnergy	equ 175
 
+RaceStateIdx	equ 0
+CountStateIdx	equ 1
+P1WinStateIdx	equ 2
+P2WinStateIdx	equ 3
+MenuStateIdx	equ 4
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; Variables segment
@@ -102,7 +108,12 @@ Temp2		.byte	; the movement code (and maybe other stuff later) needs another ran
 TrackPtr	.word
 FinishTop	.byte
 FinishBot	.byte
+; game modes
 GameMode	.byte
+MapNum		.byte
+PrevInput	.byte
+MenuSelect	.byte
+		
 
 
 
@@ -134,7 +145,7 @@ Reset
         sta COLUP1
         
 ; lap counter
-        lda #$5
+        lda #$2
         sta P1Laps
         sta P2Laps
          
@@ -152,11 +163,11 @@ Reset
         sta P2Energy
         
 ; track pointer
-	lda #<TrackData3
+	lda #<TrackData
         sta TrackPtr
         lda #>TrackData3
         sta TrackPtr+1
-        ldy #(3*23)	; offset total bytes of level dta to find finish line heights
+        ldy #(3*23)	; offset total bytes of level data to find finish line heights
         lda (TrackPtr),y
         sta FinishTop
         iny
@@ -167,7 +178,7 @@ Reset
 ; vertical delay on p0 so they are both synced to the right scanline        
         lda #1
         sta VDELP0
-        lda #0
+        lda #MenuStateIdx
         sta State
         
         
@@ -202,7 +213,7 @@ RaceUpdate
 NoTimerCarry
         
 ; animation!
-; could probably be condesed for more ROM space if needed
+; could probably be condensed for more ROM space if needed
 ; this only loops boost anim, not boosting caps frame seperately
 	lda Timer	; check if frame is multiple of 4
         and #1		; take 0th bit
@@ -273,7 +284,7 @@ NoP2Lap
 	sta CXCLR	; reset collision flags after we finish all collisions
 
 	
-        
+EndUpdate     
 ; update scoreboard bitmaps
 	lda P1Laps
         
@@ -303,7 +314,6 @@ NoP2Lap
         sta WSYNC	; sync w/ scanline
         sta HMOVE	; apply fine offsets
      
-EndUpdate
 ; setup for laps counter
         lda #0
         sta ENAM0
@@ -480,31 +490,127 @@ SkipP2
 
 ; update for game select, countdown, win screen, etc.
 NonRaceUpdate	subroutine
-	 cmp #1
+	cmp #CountStateIdx
         beq .CountDown
-        cmp #2
+        cmp #P1WinStateIdx
         beq .P1Win
-        cmp #3
+        cmp #P2WinStateIdx
         beq .P2Win
-        cmp #4
+        cmp #MenuStateIdx
         beq .GameSelect
         
 ;;;;; -[Game Mode Select]- ;;;;;
-.GameSelect
+.GameSelect 
+
+	bit INPT4	; reset if either button is pushed
+        bmi .MenuInput
+        bit INPT5
+        bmi .MenuInput
+        lda #CountStateIdx	; if both are pressed, go to countdown
+        sta State		; (this input shuold probably be changed)
+        jmp .Return
+        
+.MenuInput	
+        lda MenuSelect	; get current menu selection
+        sta P1Laps	; show in laps for now
+        
+        lda SWCHA	; get Input Map
+        lsr
+        lsr		; combine player 1 and 2 inputs to the same lower 4 bits
+        lsr
+        lsr
+        and SWCHA
+        cmp PrevInput	; only do stuff on button press
+        beq .Return      
+        sta Temp2
+       
+        ; parse inputs
+        lda #1
+        bit Temp2		; up pressed?
+        bne .NoUp
+        inc MenuSelect
+.NoUp
+        lda #2
+        bit Temp2
+        bne .NoDown	; Down pressed
+        dec MenuSelect
+.NoDown
+
+        lda #3		; Loop if bigger than this
+        cmp MenuSelect
+        bcs .NoSelectLoop
+        lda #0
+        sta MenuSelect
+.NoSelectLoop
+
+	        ; parse inputs
+        lda #4
+        bit Temp2		; up pressed?
+        bne .NoLeft
+        inc P2Laps
+.NoLeft
+        lda #8
+        bit Temp2
+        bne .NoRight	; Down pressed
+        dec P2Laps
+.NoRight
+        
+        lda MenuSelect
+        sta P1Laps
+        
+        lda Temp2
+        sta PrevInput
+
+	
+	jmp .Return
+       
 	
 ;;;;; -[Countdown Update]- ;;;;;
 .CountDown
-
+        
+	inc Timer
+        lda #60		
+        cmp Timer	; has it been 60 frames?
+        bne .Return
+        lda #0		; it has been 1 second, reset the timer
+        sta Timer
+        dec P1Laps	; subtract form timer
+        bne .Return	; there are still a few seconds, keep waiting
+        
+        lda P2Laps	; Timer reached 0, start the race!
+        sta P1Laps
+	lda #RaceStateIdx
+        sta State
+        rts
 ;;;;; -[Win Screen Update]- ;;;;;       
 .P1Win
 .P2Win
 	bit INPT4	; reset if either button is pushed
-        ;bpl Reset
+        bmi .Return
         bit INPT5
-        ;bpl Reset
-        jmp EndUpdate
-
-
+        bmi .Return
+        ; go back to menu/game select
+        lda #0		; zero timers and velocities
+        sta Timer
+        sta Timer+1
+        
+        sta P1VelX
+        sta P1VelY
+	sta P1VelFX
+        sta P1VelFY
+        sta P2VelX
+        sta P2VelY
+	sta P2VelFX
+        sta P2VelFY
+        
+        sta Temp	; reset selection to 0 before entering menu
+        lda #3
+        sta P1Laps
+        lda #5
+        sta P2Laps
+        lda #MenuStateIdx
+        sta State
+.Return
 	rts
 
 ; update laps when lap line is hit
