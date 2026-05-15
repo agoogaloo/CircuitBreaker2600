@@ -27,6 +27,8 @@ LapsHeight	equ 192 - 10
 NormAccel	equ 12
 BoostAccel	equ 30
 
+MaxEnergy	equ 175
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -134,7 +136,7 @@ Reset
         sta P1FramePtr+1
         sta P2FramePtr+1
         
-        lda #170
+        lda #MaxEnergy
         sta P1Energy
         sta P2Energy
         
@@ -220,7 +222,7 @@ DoneAnimIncr
 	ldx #0
 	jsr MoveJoystick
         ldx #2
-        ;jsr MoveJoystick
+        jsr MoveJoystick
         
 ; apply velocity/collision
 	lda Timer
@@ -664,17 +666,24 @@ MoveJoystick	subroutine
         cmp Temp	; compare whole components
         bcc .BigYVel	; whole compoent of y is bigger
         bne .BigXVel	; not equal -> whole of X is bigger
+        cmp #0		; if x and y velocities are less than 1, just ignore
+        beq .DoneVelCheck
         tya		
         cmp Temp2	; whole compoent was equal -> check fractions
         bcc .BigYVel	; fraction of y is bigger
         bne .BigXVel	; not equal -> fraction of X is bigger
+        lda #0
         jmp .DoneVelCheck
 .BigYVel
-	nop
+	lda #$80
         jmp .DoneVelCheck
 .BigXVel
-	nop
+	lda #$40
 .DoneVelCheck
+	; 100..0 = y bigger, 01..00 = x bigger
+	sta Temp2 ; store indicator in Temp2
+        sta P1Laps,x
+
 
 
         
@@ -686,15 +695,15 @@ MoveJoystick	subroutine
         bpl .boost
         jmp .NoBoost
 P2Boost
-	bit INPT5	; checl p2 boost input
+	bit INPT5	; check p2 boost input
         bpl .boost
         jmp .NoBoost
 	
 .boost  		; do the boost
 	lda P1Energy,x
-        beq .NoBoost	; no energy left :(
         sec
 	sbc #2		; consume 2 boost meter
+        bcc .NoBoost	; don't boost if you don't have enought energy
         sta P1Energy,x
 	lda #BoostAccel ; store acceleration in Temp
         sta Temp
@@ -770,15 +779,20 @@ P2Boost
         inc P1VelY,x
         
 .SkipMoveUp
+	
 	tya
 	cmp P1VelFY,x
         beq .NoChangeY	; check if we acually moved in y axis
 	sta P1VelFY,x	; update value
-; check for drift
-	;lda P1VelFX,x	; compare x/y velocity 
-        ;bmi .NoChangeY
-        ;inc P1Energy,x
         
+; check for drift
+        bit Temp2	; check priamry velocity direction
+        bvc .NoChangeY	; 
+        lda #MaxEnergy
+     	cmp P1Energy,x
+        bcc .NoChangeY
+        
+        inc P1Energy,x	; add energy if velocity is in x axis
         
 .NoChangeY   
         
@@ -836,7 +850,20 @@ P2Boost
         inc P1VelX,x
         
 .SkipMoveRight
-	sty P1VelFX,x
+	tya
+	cmp P1VelFX,x
+        beq .NoChangeX	; check if we acually moved in y axis
+	sta P1VelFX,x	; update value
+        
+; check for drift
+        bit Temp2	; check priamry velocity direction
+        bpl .NoChangeX	; 
+        lda #MaxEnergy
+     	cmp P1Energy,x
+        bcc .NoChangeX
+        
+        inc P1Energy,x	; add energy if velocity is in x axis
+.NoChangeX
 	rts
 
 ; preconditions:
