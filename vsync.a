@@ -1,7 +1,8 @@
-E50	processor 6502
+	processor 6502
         include "vcs.h"
         include "macro.h"
         include "xmacro.h"
+
 
 ;;;; [TODO] ;;;;;
 ; shmoovement
@@ -108,9 +109,14 @@ Temp2		.byte	; the movement code (and maybe other stuff later) needs another ran
 TrackPtr	.word
 FinishTop	.byte
 FinishBot	.byte
-; game modes
-GameMode	.byte
+
+; game mode/settings
+GameOptions
 MapNum		.byte
+StartLaps	.byte
+GameMode	.byte
+ColourNum	.byte
+
 PrevInput	.byte
 MenuSelect	.byte
 		
@@ -145,9 +151,9 @@ Reset
         sta COLUP1
         
 ; lap counter
-        lda #$2
-        sta P1Laps
-        sta P2Laps
+        lda #$5
+        sta StartLaps
+       
          
 ; sprite frames
         lda #FrameL0-AnimationStart
@@ -163,16 +169,18 @@ Reset
         sta P2Energy
         
 ; track pointer
-	lda #<TrackData
+	lda #<TrackData0
         sta TrackPtr
-        lda #>TrackData3
+        lda #>TrackData0
         sta TrackPtr+1
-        ldy #(3*23)	; offset total bytes of level data to find finish line heights
-        lda (TrackPtr),y
-        sta FinishTop
-        iny
-        lda (TrackPtr),y
-        sta FinishBot
+        jsr LoadTrack
+        
+        ;ldy #(3*23)	; offset total bytes of level data to find finish line heights
+        ;lda (TrackPtr),y
+       	;sta FinishTop
+        ;iny
+        ;lda (TrackPtr),y
+        ;sta FinishBot
 
         
 ; vertical delay on p0 so they are both synced to the right scanline        
@@ -498,73 +506,6 @@ NonRaceUpdate	subroutine
         beq .P2Win
         cmp #MenuStateIdx
         beq .GameSelect
-        
-;;;;; -[Game Mode Select]- ;;;;;
-.GameSelect 
-
-	bit INPT4	; reset if either button is pushed
-        bmi .MenuInput
-        bit INPT5
-        bmi .MenuInput
-        lda #CountStateIdx	; if both are pressed, go to countdown
-        sta State		; (this input shuold probably be changed)
-        jmp .Return
-        
-.MenuInput	
-        lda MenuSelect	; get current menu selection
-        sta P1Laps	; show in laps for now
-        
-        lda SWCHA	; get Input Map
-        lsr
-        lsr		; combine player 1 and 2 inputs to the same lower 4 bits
-        lsr
-        lsr
-        and SWCHA
-        cmp PrevInput	; only do stuff on button press
-        beq .Return      
-        sta Temp2
-       
-        ; parse inputs
-        lda #1
-        bit Temp2		; up pressed?
-        bne .NoUp
-        inc MenuSelect
-.NoUp
-        lda #2
-        bit Temp2
-        bne .NoDown	; Down pressed
-        dec MenuSelect
-.NoDown
-
-        lda #3		; Loop if bigger than this
-        cmp MenuSelect
-        bcs .NoSelectLoop
-        lda #0
-        sta MenuSelect
-.NoSelectLoop
-
-	        ; parse inputs
-        lda #4
-        bit Temp2		; up pressed?
-        bne .NoLeft
-        inc P2Laps
-.NoLeft
-        lda #8
-        bit Temp2
-        bne .NoRight	; Down pressed
-        dec P2Laps
-.NoRight
-        
-        lda MenuSelect
-        sta P1Laps
-        
-        lda Temp2
-        sta PrevInput
-
-	
-	jmp .Return
-       
-	
 ;;;;; -[Countdown Update]- ;;;;;
 .CountDown
         
@@ -590,11 +531,35 @@ NonRaceUpdate	subroutine
         bit INPT5
         bmi .Return
         ; go back to menu/game select
-        lda #0		; zero timers and velocities
+        lda #0		; zero timer for menu selection
         sta Timer
+        sta MenuSelect	; reset selection to 0 before entering menu
+  
+        lda #MenuStateIdx
+        sta State	; switch to menu/settings select
+.Return
+	rts  
+;;;;; -[Game Mode Select]- ;;;;;
+.GameSelect 
+	
+        lda #45
+        cmp Timer		; wait 45 frames before checking if button is pressed
+        bcc .CheckStart
+        inc Timer		; hasn't been long enough, just do menu movement
+        jmp .MenuInput 	
+.CheckStart
+
+	bit INPT4		; start game if either button is pushed
+        bpl .StartGame
+        bit INPT5
+        bpl .StartGame
+        jmp .MenuInput		; do menu selection with joystick
+.StartGame
+	lda #0
+        sta Timer		; reset timer
         sta Timer+1
         
-        sta P1VelX
+        sta P1VelX		; reset velocities
         sta P1VelY
 	sta P1VelFX
         sta P1VelFY
@@ -603,16 +568,237 @@ NonRaceUpdate	subroutine
 	sta P2VelFX
         sta P2VelFY
         
-        sta Temp	; reset selection to 0 before entering menu
+	lda #1			;make P2 invisible in game mode 1
+        cmp GameMode
+        bne .P2Visible
+        lda #$D8
+        sta COLUP1
+.P2Visible
+        
         lda #3
-        sta P1Laps
-        lda #5
+        sta P1Laps		; timer
+        lda StartLaps
+        sta P2Laps		; move lap counter to the actual laps
+        lda #CountStateIdx	; switch to countdown to start the race
+        sta State		; (this input shuold probably be changed)
+        sta CXCLR		; clear collision flags so things don't break
+        rts
+        
+.MenuInput
+	; menu selection
+        ; 0-> track
+        ; 1-> lap count
+        ; 2-> game mode
+        ; 3-> Colours?
+        lda MenuSelect	; get current menu selection
+        sta P1Laps	; show in laps for now
+        
+        lda SWCHA	; get Input Map
+        lsr
+        lsr		; combine player 1 and 2 inputs to the same lower 4 bits
+        lsr
+        lsr
+        and SWCHA
+        cmp PrevInput	; only do stuff on button press
+        beq .Return      
+        sta PrevInput
+       
+        ; parse inputs
+        ; up/down to change menu seletion (map, mode, laps, etc.)
+        lda #1
+        bit PrevInput		; up pressed?
+        bne .NoUp
+        inc MenuSelect
+.NoUp
+        lda #2
+        bit PrevInput
+        bne .NoDown		; Down pressed
+        dec MenuSelect
+.NoDown
+
+	lda #3
+        and MenuSelect		; only take lower 2 bits for menu selection
+        sta MenuSelect
+        
+        
+       
+.NoMaxLoop
+
+	ldy MenuSelect		; get offset from menu selection	
+        lda GameOptions,y	; load current value of the option
         sta P2Laps
-        lda #MenuStateIdx
-        sta State
-.Return
+        lda MenuRanges,y	; load max value for the option
+        tax
+
+	; parse inputs
+        lda #4
+        bit PrevInput		; up pressed?
+        bne .NoLeft
+        dec P2Laps
+.NoLeft
+        lda #8
+        bit PrevInput
+        bne .NoRight	; Down pressed
+        inc P2Laps
+.NoRight
+       ; TODO: loop selection
+       
+       ; update params based on menu selection and value
+	lda #0
+        cmp MenuSelect
+        bne .NoTrack	; track select
+       	jsr MenuTrackSave
+        rts
+        
+        
+.NoTrack
+ 
+       	lda #2
+       	cmp MenuSelect	; game mode select
+        bne .NoMode
+        lda P2Laps
+        sta GameMode
+        jsr ModePosReset
+        rts
+        
+        
+.NoMode	
+	lda #3
+        cmp MenuSelect
+        bne .NoColour	; colour select
+       	jsr MenuColourSave
+        rts
+        
+.NoColour
+
+	lda P2Laps	; otherwise just save the value
+        sta GameOptions,y
+	rts
+       
+	
+MenuTrackSave 	subroutine
+	lda P2Laps
+        sta MapNum
+        bne .Not0	; is track 0 selected?
+        lda #<TrackData0
+        sta TrackPtr	; load track 0
+        lda #>TrackData0
+        sta TrackPtr+1
+        jsr LoadTrack
+        rts		; return
+.Not0
+	cmp #1
+        bne .Not1	; is track 1 selected?
+        lda #<TrackData1
+        sta TrackPtr	; load track 1
+        lda #>TrackData1
+        sta TrackPtr+1
+	jsr LoadTrack
+        rts
+.Not1
+	cmp #2
+        bne .Not2	; is track 2 selected?
+        lda #<TrackData2
+        sta TrackPtr	; load track 2
+        lda #>TrackData2
+        sta TrackPtr+1
+	jsr LoadTrack
+        rts
+
+.Not2
+	cmp #3
+        bne .Not3	; is track 2 selected?
+        lda #<TrackData3
+        sta TrackPtr	; load track 2
+        lda #>TrackData3
+        sta TrackPtr+1
+	jsr LoadTrack
+        rts
+
+.Not3
+        rts
+
+
+ModePosReset	subroutine
+	;lda GameMode
+        cmp #0
+        beq .Mode0
+        cmp #1
+        beq .Mode1
+        cmp #2
+        beq .Mode2
+; standard race mode
+.Mode0
+	lda #8
+        sta P1PosY
+        lda #18
+        sta P2PosY
+        lda #85
+        sta P1PosX
+        sta P2PosX
+        lda #0		; P2 starts on bottom 
+        sta P2LapLoc
+	lda #FrameL0-AnimationStart
+        sta P2AnimOffset
+	rts
+        
+; single player time trial
+.Mode1
+	lda #18
+        sta P1PosY
+        lda #85
+        sta P1PosX
+        lda #149
+        sta P2PosX
+        lda #4
+        sta P2PosY
+	rts
+        
+; special laps mode
+.Mode2
+	lda #18
+        sta P1PosY
+        lda #146
+        sta P2PosY
+        lda #85
+        sta P1PosX
+        lda #65
+        sta P2PosX
+        lda #1		; P2 starts on the top in this mode 
+        sta P2LapLoc
+        lda #FrameR0-AnimationStart
+        sta P2AnimOffset
+        
+ 
+        rts
+        
+MenuColourSave	subroutine
+	lda P2Laps
+        sta ColourNum
+        asl
+        asl		; multiply by 8
+        asl
+        ;asl
+        tax		; save to use with P2
+        adc #$1F	; add offset to base colour
+        sta COLUP0
+        txa
+        
+        adc #$5F	; add offset to base colour
+        sta COLUP1
+
+        
 	rts
 
+; Initilizes rest of track based on trackPtr
+LoadTrack	subroutine
+ 	ldy #(3*23)	; offset total bytes of level data to find finish line heights
+        lda (TrackPtr),y
+        sta FinishTop
+        iny
+        lda (TrackPtr),y
+        sta FinishBot
+        rts
 ; update laps when lap line is hit
 ; preconditions: 
 ; x-> playerNum (0/2)
@@ -1046,8 +1232,14 @@ AbsVal	subroutine
 .PositiveY
         rts
         
-	align #$100   	; make address aligned or it takes too long to look up   
+        
+        ;;;;;; -[Non-Code Data]- ;;;;;
+        
+MenuRanges
+	.byte #3,#50,#3,16
+
 ;Animations
+	align #$100   	; make address aligned or it takes too long to look up   
 AnimationStart
 FrameU0
 	.byte #0,#0
@@ -1251,7 +1443,7 @@ DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
 
      	.align #$100   
 ; Tracks
-TrackData        	
+TrackData0   	
 	
 	.byte %11110000,%11111111,%11111111
 	.byte %11110000,%11000000,%00000000
@@ -1278,36 +1470,7 @@ TrackData
 	.byte %11110000,%11111111,%11111111
         .byte #120,#60	; bounds for finish line
 
-
-
-
 TrackData1
-	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11000000,%00000000
-	.byte %11110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %00110000,%00000011,%00000000
-	.byte %00110000,%00001111,%00000000
-	.byte %00110000,%00011110,%11100000
-	.byte %00110000,%00011000,%11111000
-	.byte %00110000,%00000000,%11111100
-	.byte %00110000,%00000000,%11111110
-	.byte %00110000,%00000001,%11111111
-	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00011111,%00011111
-	.byte %00110000,%00011111,%00000111
-	.byte %00110000,%00011111,%00000011
-	.byte %00110000,%00011111,%00000001
-	.byte %00110000,%00001110,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%11100000
-	.byte %01110000,%00000000,%11110000
-	.byte %11110000,%11111111,%11111111
-        .byte #120,#60	; bounds for finish line
-
-TrackData3
 	.byte %11110000,%11111111,%11111111
 	.byte %11110000,%11111111,%00000000
 	.byte %11110000,%11100000,%00000000
@@ -1331,24 +1494,64 @@ TrackData3
 	.byte %01110000,%00000000,%00000000
 	.byte %11110000,%10000000,%00000000
 	.byte %11110000,%11111111,%11111111
-        .byte #124, #60	; bounds for finish line
+        .byte #124, #60	; bounds for finish lines
 
 
 
+TrackData2
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %00110000,%00000011,%00000000
+	.byte %00110000,%00001111,%00000000
+	.byte %00110000,%00011110,%11100000
+	.byte %00110000,%00011000,%11111000
+	.byte %00110000,%00000000,%11111100
+	.byte %00110000,%00000000,%11111110
+	.byte %00110000,%00000001,%11111111
+	.byte %00110000,%00000111,%11111111
+	.byte %00110000,%00011111,%00011111
+	.byte %00110000,%00011111,%00000111
+	.byte %00110000,%00011111,%00000011
+	.byte %00110000,%00011111,%00000001
+	.byte %00110000,%00001110,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %00110000,%00000000,%11100000
+	.byte %01110000,%00000000,%11110000
+	.byte %11110000,%11111111,%11111111
+        .byte #120,#80	; bounds for finish lines
 
+	.align #$100
+TrackData3
+	.byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$FF,$FF,$FF
+        .byte #$00,$00,$00
+        .byte #$00,$FF,$FF
+        .byte #160,#80
+	
 
-
-
-
-
-
-        
- 
-
-
-
-
-        
 
 	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
