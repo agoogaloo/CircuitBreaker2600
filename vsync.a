@@ -101,6 +101,9 @@ P1LapLoc	.byte
 P2Laps		.byte
 P2LapLoc	.byte
 
+CrashSound	.byte
+BoostSound	.byte
+
 ; scoreboard buffer
 LapsBuff	.ds 8*2
 
@@ -175,12 +178,6 @@ Reset
         sta TrackPtr+1
         jsr LoadTrack
         
-        ;ldy #(3*23)	; offset total bytes of level data to find finish line heights
-        ;lda (TrackPtr),y
-       	;sta FinishTop
-        ;iny
-        ;lda (TrackPtr),y
-        ;sta FinishBot
 
         
 ; vertical delay on p0 so they are both synced to the right scanline        
@@ -189,6 +186,23 @@ Reset
         lda #MenuStateIdx
         sta State
         
+        ; 
+        lda #8
+        sta AUDC0
+        lda #7
+        sta AUDF0
+        
+        ; good setting for boost sound effect
+        lda #2
+        sta AUDC1
+        lda #3
+        sta AUDF1
+        
+        ; drift sound effect
+	;lda #8
+        ;sta AUDC1
+        ;lda #7
+        ;sta AUDF1
         
         
 ; main loop
@@ -210,6 +224,23 @@ NextFrame
         lda P2Laps
         ldx #8
         jsr LapsBitmap
+
+; update sounds
+        lda CrashSound
+        beq NoCrashDecr
+        dec CrashSound
+NoCrashDecr
+        lsr
+        sta AUDV0
+        
+        lda BoostSound
+        beq NoBoostDecr
+        dec BoostSound
+NoBoostDecr
+        lsr
+        lsr
+        sta AUDV1
+        
         
 ; check state, and update accordingly
         lda State
@@ -594,7 +625,7 @@ NonRaceUpdate	subroutine
         sta COLUP1
 .P2Visible
         
-        lda #3
+        lda #1
         sta P1Laps		; timer
         lda StartLaps
         sta P2Laps		; move lap counter to the actual laps
@@ -621,6 +652,10 @@ NonRaceUpdate	subroutine
         cmp PrevInput	; only do stuff on button press
         beq .Return      
         sta PrevInput
+        
+       
+        lda #8
+        sta CrashSound
        
         ; parse inputs
         ; up/down to change menu seletion (map, mode, laps, etc.)
@@ -646,8 +681,7 @@ NonRaceUpdate	subroutine
 	ldy MenuSelect		; get offset from menu selection	
         lda GameOptions,y	; load current value of the option
         sta P2Laps
-        lda MenuRanges,y	; load max value for the option
-        tax
+       
 
 	; parse inputs
         lda #4
@@ -660,16 +694,26 @@ NonRaceUpdate	subroutine
         bne .NoRight	; Down pressed
         inc P2Laps
 .NoRight
-       ; TODO: loop selection
+       	; TODO: loop selection
+      	ldx MenuRanges,y		; load max value for selection
+        lda #$FF
+       	cmp P2Laps
+       	bne .NoDownLoop
+       	stx P2Laps
+.NoDownLoop
+	;inx
+	cpx P2Laps
+        bcs .NoUpLoop
+        lda #0
+        sta P2Laps
+.NoUpLoop
        
        ; update params based on menu selection and value
 	lda #0
         cmp MenuSelect
         bne .NoTrack	; track select
        	jsr MenuTrackSave
-        rts
-        
-        
+        rts   
 .NoTrack
  
        	lda #2
@@ -767,10 +811,11 @@ ModePosReset	subroutine
         sta P1PosY
         lda #85
         sta P1PosX
-        lda #149
+        lda #0
         sta P2PosX
-        lda #4
         sta P2PosY
+        sta P2PrevPos
+        sta P2PrevPos+1
 	rts
         
 ; special laps mode
@@ -828,24 +873,20 @@ CheckLaps	subroutine
        	lda P1LapLoc,x	
         
         beq .Return	; last touch was also on top, don't count 
-        sed		;set decimal mode for changing laps
-        lda P1Laps,x	; decrement lap counter
-        sbc #1
-        sta P1Laps,x
+	jsr SubtractLap	; completed a 1/2 lap, subtract from the remaining laps
         
-        cld
-        beq .WinGame
+        
+        lda P1Laps,x		; load remaining laps again for check 
+        beq .WinGame	; win if there are no laps left
 	lda #0		
         sta P1LapLoc,x
         rts
 .BotLine
 	lda P1LapLoc,x	
         bne .Return	; last touch was also on top, don't count 
-        sed
-        lda P1Laps,x	; decrement lap counter
-        sbc #0		; we already branched from the carry, so we dont need to clear it
-        sta P1Laps,x	; need to do this the long way because BCD
-        cld
+        jsr SubtractLap
+        
+        lda P1Laps,x		; load remaining laps again for check 
         beq .WinGame
 
         		
@@ -867,6 +908,32 @@ CheckLaps	subroutine
         sta Timer+1
 	rts
         
+        
+SubtractLap	subroutine
+	sed		;set decimal mode for changing laps
+        lda P1Laps,x	; decrement lap counter
+        sec
+        sbc #1
+        sta P1Laps,x
+        
+        ; increment other player laps in game mode 2
+        lda #2
+        cmp GameMode
+        bne .NormMode	; skip if not mode 2
+        txa
+        eor #2			; flip bit to get other player offset
+        tax
+        lda P1Laps,x
+        ;sec 			; carry will always be set because last subtract shouldnt overflow
+        adc #0			; subtract 1
+        sta P1Laps,x 
+        txa
+        eor #2			; flip bit back
+        tax
+        
+.NormMode
+	cld
+	rts
         
 ; preconditions: 
 ; a-> frame counter (x or y collision)
@@ -913,6 +980,14 @@ WallCollision	subroutine
        
         lda P1PrevPos,y	; reset position 
         sta P1PosX,y
+        ; play sound
+        lda #8
+        sta AUDC0	; set audio setting to crash sound
+        lda #7
+        sta AUDF0
+        lda #8
+        sta CrashSound
+        
         
        
 .NoWall
@@ -1101,6 +1176,14 @@ P2Boost
         sta P1Energy,x
 	lda #BoostAccel ; store acceleration in Temp
         sta Temp
+        ; do sound effect
+        lda #10
+        cmp BoostSound
+        bcc .SkipSound
+        lda #12
+        sta BoostSound
+.SkipSound
+
         jmp .EndBoost
 
 .NoBoost		; don't boost
@@ -1183,7 +1266,7 @@ P2Boost
      	cmp P1Energy,x
         bcc .NoChangeY
         
-        inc P1Energy,x	; add energy if velocity is in x axis
+        jsr InDrift
         
 .NoChangeY   
         
@@ -1251,8 +1334,20 @@ P2Boost
      	cmp P1Energy,x
         bcc .NoChangeX
         
-        inc P1Energy,x	; add energy if velocity is in x axis
+        jsr InDrift
 .NoChangeX
+	rts
+        
+InDrift	subroutine
+	inc P1Energy,x	; add energy if velocity is in x axis
+        ; drift sound effect
+        
+	lda #2
+        sta AUDC0
+        lda #15
+        sta AUDF0
+        lda #4
+        sta CrashSound
 	rts
 
 ; preconditions:
@@ -1275,7 +1370,7 @@ AbsVal	subroutine
         ;;;;;; -[Non-Code Data]- ;;;;;
         
 MenuRanges
-	.byte #3,#50,#3,16
+	.byte #3,#32,#2,#64
 
 ;Animations
 	align #$100   	; make address aligned or it takes too long to look up   
