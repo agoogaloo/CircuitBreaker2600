@@ -186,17 +186,17 @@ Reset
         lda #MenuStateIdx
         sta State
         
-        ; 
-        lda #8
-        sta AUDC0
-        lda #7
-        sta AUDF0
+        ; crash sound
+        ;lda #8
+        ;sta AUDC0
+        ;lda #7
+        ;sta AUDF0
         
         ; good setting for boost sound effect
-        lda #2
-        sta AUDC1
-        lda #3
-        sta AUDF1
+        ;lda #2
+        ;sta AUDC1
+        ;lda #3
+        ;sta AUDF1
         
         ; drift sound effect
 	;lda #8
@@ -237,6 +237,7 @@ NoCrashDecr
         beq NoBoostDecr
         dec BoostSound
 NoBoostDecr
+        lsr
         lsr
         lsr
         sta AUDV1
@@ -308,10 +309,13 @@ DoneAnimIncr
 	lda Timer
 	ldy #0
 	jsr WallCollision
+        lda #1
+        cmp GameMode
+        beq SkipP2Move
         lda Timer
         ldy #2
         jsr WallCollision
-
+SkipP2Move
 ; finish line triggers
 	bit CXP0FB
         bvc NoP1Lap
@@ -550,8 +554,10 @@ NonRaceUpdate	subroutine
         beq .P1Win
         cmp #P2WinStateIdx
         beq .P2Win
-        cmp #MenuStateIdx
-        beq .GameSelect
+        jmp .GameSelect
+        ;cmp #MenuStateIdx
+       ; beq .GameSelect
+        
 ;;;;; -[Countdown Update]- ;;;;;
 .CountDown
         
@@ -561,28 +567,89 @@ NonRaceUpdate	subroutine
         bne .Return
         lda #0		; it has been 1 second, reset the timer
         sta Timer
+        
+        lda #10
+        sta AUDC1	; play sound
+        lda #3
+       	sta AUDF1
+        lda #32
+        sta BoostSound
+        
         dec P1Laps	; subtract form timer
         bne .Return	; there are still a few seconds, keep waiting
         
+        lda #1		; higher pitch at the end
+       	sta AUDF1
+        lda #40
+        sta BoostSound
         lda P2Laps	; Timer reached 0, start the race!
         sta P1Laps
 	lda #RaceStateIdx
         sta State
         rts
+        
 ;;;;; -[Win Screen Update]- ;;;;;       
 .P1Win
+	ldy #2
+        jmp .BothWinState
 .P2Win
+	ldy #0
+        
+.BothWinState
+	lda Timer
+        and #1
+        bne .EndAnim
+        lda P2AnimFrame
+        clc
+        adc #AnimOffset
+        sta P2AnimFrame
+        cmp #70
+        bcs .EndAnim	 ; don't update after max animation frame at 7
+        
+
+	lda #ExplosionFrames-AnimationStart	; animation offset for death anim
+        clc
+        adc P2AnimFrame
+        sta P1FrameOffset,y
+        jmp .EndAnim
+.EndAnim
+	lda Timer
+        cmp #45
+        bne .WinNoTimer	; increment timer if it has been less than 30 frames
 	bit INPT4	; reset if either button is pushed
-        bmi .Return
+        bpl .WinToMenu
         bit INPT5
-        bmi .Return
+        bpl .WinToMenu
+        rts		; otherwise, just exit
+.WinToMenu
         ; go back to menu/game select
         lda #0		; zero timer for menu selection
         sta Timer
         sta MenuSelect	; reset selection to 0 before entering menu
-  
+
         lda #MenuStateIdx
         sta State	; switch to menu/settings select
+.WinNoTimer
+	inc Timer	; increment timer
+        
+        and #7		; mod 8
+        bne .Return
+        
+        lda Timer
+        lsr		; temp = Timer/4
+        lsr
+        lsr
+        sta Temp
+        
+        lda #8
+        ;sec
+        sbc Temp
+        sta AUDF1
+        lda #10
+        sta AUDC1
+        lda #50
+        sta BoostSound
+        
 .Return
 	rts  
 ;;;;; -[Game Mode Select]- ;;;;;
@@ -591,6 +658,12 @@ NonRaceUpdate	subroutine
 	lda P1Laps
         ldx #0
 	jsr MenuBitmap
+        
+        lda #FrameU0-AnimationStart
+        sta P1FrameOffset
+	sta P2FrameOffset
+
+      
         
         lda #45
         cmp Timer		; wait 45 frames before checking if button is pressed
@@ -605,6 +678,8 @@ NonRaceUpdate	subroutine
         bpl .StartGame
         jmp .MenuInput		; do menu selection with joystick
 .StartGame
+	
+        
 	lda #0
         sta Timer		; reset timer
         sta Timer+1
@@ -618,6 +693,10 @@ NonRaceUpdate	subroutine
 	sta P2VelFX
         sta P2VelFY
         
+	lda #MaxEnergy		; reset energy
+        sta P1Energy
+        sta P2Energy
+        
 	lda #1			;make P2 invisible in game mode 1
         cmp GameMode
         bne .P2Visible
@@ -625,23 +704,28 @@ NonRaceUpdate	subroutine
         sta COLUP1
 .P2Visible
         
-        lda #1
-        sta P1Laps		; timer
+        lda #2
+        sta P1Laps		; starting countdown
         lda StartLaps
         sta P2Laps		; move lap counter to the actual laps
         lda #CountStateIdx	; switch to countdown to start the race
         sta State		; (this input shuold probably be changed)
         sta CXCLR		; clear collision flags so things don't break
         rts
-        
+
 .MenuInput
 	; menu selection
         ; 0-> track
         ; 1-> lap count
         ; 2-> game mode
-        ; 3-> Colours?
+        ; 3-> Colours
         lda MenuSelect	; get current menu selection
-        sta P1Laps	; show in laps for now
+        sta P1Laps	; show in P1laps
+        tay
+        lda GameOptions,y
+        sta P2Laps	; update setting value
+        jsr ModePosReset	; update starting positions
+      
         
         lda SWCHA	; get Input Map
         lsr
@@ -650,12 +734,14 @@ NonRaceUpdate	subroutine
         lsr
         and SWCHA
         cmp PrevInput	; only do stuff on button press
-        beq .Return      
+        beq .Return  
         sta PrevInput
         
+        lda #12
+        sta AUDC0
+        lda #7
+       	sta AUDF0
        
-        lda #8
-        sta CrashSound
        
         ; parse inputs
         ; up/down to change menu seletion (map, mode, laps, etc.)
@@ -663,43 +749,47 @@ NonRaceUpdate	subroutine
         bit PrevInput		; up pressed?
         bne .NoUp
         inc MenuSelect
+        lda #10
+        sta CrashSound
 .NoUp
         lda #2
         bit PrevInput
         bne .NoDown		; Down pressed
         dec MenuSelect
+        lda #10
+        sta CrashSound
 .NoDown
 
 	lda #3
         and MenuSelect		; only take lower 2 bits for menu selection
         sta MenuSelect
-        
-        
-       
-.NoMaxLoop
-
-	ldy MenuSelect		; get offset from menu selection	
+        tay
         lda GameOptions,y	; load current value of the option
-        sta P2Laps
+        sta P2Laps		; show value in P2Laps
+	
        
 
 	; parse inputs
         lda #4
-        bit PrevInput		; up pressed?
+        bit PrevInput		; Left pressed?
         bne .NoLeft
         dec P2Laps
+        lda #10
+        sta CrashSound
 .NoLeft
         lda #8
         bit PrevInput
-        bne .NoRight	; Down pressed
+        bne .NoRight	; Right pressed
         inc P2Laps
+        lda #10
+        sta CrashSound
 .NoRight
-       	; TODO: loop selection
       	ldx MenuRanges,y		; load max value for selection
         lda #$FF
        	cmp P2Laps
        	bne .NoDownLoop
        	stx P2Laps
+        
 .NoDownLoop
 	;inx
 	cpx P2Laps
@@ -721,7 +811,7 @@ NonRaceUpdate	subroutine
         bne .NoMode
         lda P2Laps
         sta GameMode
-        jsr ModePosReset
+        
         rts
         
         
@@ -737,8 +827,8 @@ NonRaceUpdate	subroutine
 	lda P2Laps	; otherwise just save the value
         sta GameOptions,y
 	rts
-       
-	
+ 
+ 
 MenuTrackSave 	subroutine
 	lda P2Laps
         sta MapNum
@@ -783,7 +873,7 @@ MenuTrackSave 	subroutine
 
 
 ModePosReset	subroutine
-	;lda GameMode
+	lda GameMode
         cmp #0
         beq .Mode0
         cmp #1
@@ -803,6 +893,7 @@ ModePosReset	subroutine
         sta P2LapLoc
 	lda #FrameL0-AnimationStart
         sta P2AnimOffset
+        sta P1AnimOffset
 	rts
         
 ; single player time trial
@@ -816,6 +907,8 @@ ModePosReset	subroutine
         sta P2PosY
         sta P2PrevPos
         sta P2PrevPos+1
+        lda #FrameL0-AnimationStart
+        sta P1AnimOffset
 	rts
         
 ; special laps mode
@@ -830,10 +923,10 @@ ModePosReset	subroutine
         sta P2PosX
         lda #1		; P2 starts on the top in this mode 
         sta P2LapLoc
-        lda #FrameR0-AnimationStart
+        lda #FrameR0-AnimationStart	; both players face opposite directions
         sta P2AnimOffset
-        
- 
+        lda #FrameL0-AnimationStart
+        sta P1AnimOffset
         rts
         
 MenuColourSave	subroutine
@@ -894,6 +987,7 @@ CheckLaps	subroutine
         sta P1LapLoc,x
 .Return
 	rts
+; transition to win state
 .WinGame
 	txa
         lsr		; convert to 2/3 for player 1/2 win
@@ -904,8 +998,10 @@ CheckLaps	subroutine
         lda Timer
         sta P2Laps
         lda #0
-        sta Timer
+        sta Timer	; reset timer
         sta Timer+1
+        sta P1AnimFrame
+        sta P2AnimFrame
 	rts
         
         
@@ -992,6 +1088,9 @@ WallCollision	subroutine
        
 .NoWall
 	rts
+        
+        
+
 
 ; pre conditions: x=offset into array ,a=BCD number
 LapsBitmap	subroutine
@@ -1068,6 +1167,7 @@ MenuBitmap	subroutine
 ; SetHorizPos routine
 ; A = X coordinate
 ; X = player number (0 or 1)
+	
 SetHorizPos	subroutine
 	sta WSYNC	; start a new line
         bit 0		; waste 3 cycles
@@ -1084,7 +1184,6 @@ DivideLoop
         ;lda #$80
 	sta HMP0,x	; set fine offset
 	rts		; return to caller
-
 
 ; Read joystick movement/boost and apply to 
 ; x is 0 for p1, 2 for p2
@@ -1177,10 +1276,15 @@ P2Boost
 	lda #BoostAccel ; store acceleration in Temp
         sta Temp
         ; do sound effect
-        lda #10
-        cmp BoostSound
+        lda #2
+        sta AUDC1	; track settings
+        lda #3
+        sta AUDF1
+        
+        lda #20
+        cmp BoostSound	; only refresh sound when its below 20 frames
         bcc .SkipSound
-        lda #12
+        lda #26
         sta BoostSound
 .SkipSound
 
@@ -1432,7 +1536,7 @@ FrameR0
         .byte #%00011100;$1E
         
         .byte #0,#0
-	 .byte #%00011100;$1E
+	.byte #%00011100;$1E
         .byte #%00111000;$1E
         .byte #%00111110;$1E
         .byte #%01111001;$1E
@@ -1525,6 +1629,80 @@ FrameL0
         .byte #%01111110;$1E
         .byte #%00011100;$1E
         .byte #%00111000;$1E
+        
+ExplosionFrames
+
+	.byte #0,#0
+	.byte #%00000000;$1E
+        .byte #%00000000;$1E
+        .byte #%00001000;$1E
+        .byte #%00011100;$1E
+        .byte #%00001000;$1E
+        .byte #%00000000;$1E
+        .byte #%00000000;$1E
+        
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00001000;$1E
+        .byte #%00011100;$1E
+        .byte #%00111110;$1E
+        .byte #%00011100;$1E
+        .byte #%00001000;$1E
+        .byte #%00000000;$1E
+
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00011100;$1E
+        .byte #%00110110;$1E
+        .byte #%00100010;$1E
+        .byte #%00110110;$1E
+        .byte #%00011100;$1E
+        .byte #%00000000;$1E
+
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00011100;$1E
+        .byte #%00100010;$1E
+        .byte #%00100010;$1E
+        .byte #%00100010;$1E
+        .byte #%00011100;$1E
+        .byte #%00000000;$1E
+
+	.byte #0,#0
+        .byte #%00110010;$1E
+        .byte #%01000001;$1E
+        .byte #%00000000;$1E
+        .byte #%00011101;$1E
+        .byte #%01010001;$1E
+        .byte #%01000001;$1E
+        .byte #%00110010;$1E
+
+	.byte #0,#0
+        .byte #%00100010;$1E
+        .byte #%01000001;$1E
+        .byte #%00001000;$1E
+        .byte #%00011100;$1E
+        .byte #%00010000;$1E
+        .byte #%01000001;$1E
+        .byte #%00100010;$1E
+
+	.byte #0,#0
+        .byte #%01000001;$1E
+        .byte #%00000000;$1E
+        .byte #%00000100;$1E
+        .byte #%00110110;$1E
+        .byte #%01100000;$1E
+        .byte #%00000000;$1E
+        .byte #%01000001;$1E
+
+	.byte #0,#0
+        .byte #%00000000;$1E
+        .byte #%00000000;$1E
+        .byte #%00000100;$1E
+        .byte #%00110010;$1E
+        .byte #%01100000;$1E
+        .byte #%00000000;$1E
+        .byte #%00000000;$1E
 ;---End Graphics Data---
 	align #$100
 ; Bitmap pattern for digits
@@ -1542,13 +1720,13 @@ DigitsBitmap ;;{w:8,h:5,count:10,brev:1};;
         .byte #%01000100;--
         .byte #%01000100;--
         .byte #%01000100;--
-Frame2
-     .byte #%11001100;--
+
+    	.byte #%11001100;--
         .byte #%00100010;--
         .byte #%11101110;--
         .byte #%10001000;--
         .byte #%11101110;--
-Frame3
+
         .byte #%11001100;--
         .byte #%00100010;--
         .byte #%01100110;--
