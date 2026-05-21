@@ -427,7 +427,7 @@ EndLapsMenuCheck
  	
         dex
         sta WSYNC
-        lda #$01
+        lda #%010001
         sta CTRLPF
         lda #$c3
         sta COLUBK
@@ -869,10 +869,37 @@ MenuTrackSave 	subroutine
         rts
 
 .Not3
+	cmp #4
+        bne .Not4	; is track 2 selected?
+        lda #<TrackData4
+        sta TrackPtr	; load track 2
+        lda #>TrackData4
+        sta TrackPtr+1
+	jsr LoadTrack
+        rts
+
+.Not4
+	cmp #5
+        bne .Not4	; is track 2 selected?
+        lda #<TrackData5
+        sta TrackPtr	; load track 2
+        lda #>TrackData5
+        sta TrackPtr+1
+	jsr LoadTrack
+        rts
+
+.Not5
         rts
 
 
 ModePosReset	subroutine
+	ldy #(3*23)+2	; offset total bytes of level data to find starting position heights
+        lda (TrackPtr),y
+        sta P1PosY	; store bottom height in P1Pos
+        iny
+        lda (TrackPtr),y
+        sta P2PosY	; store top height in P2Pos
+        
 	lda GameMode
         cmp #0
         beq .Mode0
@@ -882,10 +909,14 @@ ModePosReset	subroutine
         beq .Mode2
 ; standard race mode
 .Mode0
-	lda #8
-        sta P1PosY
-        lda #18
+	clc
+	lda #6
+        adc P1PosY
         sta P2PosY
+        lda #-6
+        adc P1PosY
+        sta P1PosY
+        
         lda #85
         sta P1PosX
         sta P2PosX
@@ -898,8 +929,7 @@ ModePosReset	subroutine
         
 ; single player time trial
 .Mode1
-	lda #18
-        sta P1PosY
+	; P1Y is already in correct spot
         lda #85
         sta P1PosX
         lda #0
@@ -913,13 +943,10 @@ ModePosReset	subroutine
         
 ; special laps mode
 .Mode2
-	lda #18
-        sta P1PosY
-        lda #146
-        sta P2PosY
+	; y positions are already lloaded from level
         lda #85
         sta P1PosX
-        lda #65
+        lda #67
         sta P2PosX
         lda #1		; P2 starts on the top in this mode 
         sta P2LapLoc
@@ -929,6 +956,7 @@ ModePosReset	subroutine
         sta P1AnimOffset
         rts
         
+; update and save colours
 MenuColourSave	subroutine
 	lda P2Laps
         sta ColourNum
@@ -956,12 +984,13 @@ LoadTrack	subroutine
         lda (TrackPtr),y
         sta FinishBot
         rts
+        
 ; update laps when lap line is hit
 ; preconditions: 
 ; x-> playerNum (0/2)
 CheckLaps	subroutine
 	lda P1PosY,x	; get y position
-        cmp #56		; check bottom line
+        cmp FinishBot	; check bottom line
         bcc .BotLine	; below 
        	lda P1LapLoc,x	
         
@@ -1474,7 +1503,7 @@ AbsVal	subroutine
         ;;;;;; -[Non-Code Data]- ;;;;;
         
 MenuRanges
-	.byte #3,#32,#2,#64
+	.byte #5,#32,#2,#64
 
 ;Animations
 	align #$100   	; make address aligned or it takes too long to look up   
@@ -1845,7 +1874,7 @@ ModesBitmap
         .byte #%01100110;--
      	.align #$100   
 ; Tracks
-TrackData0   	
+TrackData0	
 	
 	.byte %11110000,%11111111,%11111111
 	.byte %11110000,%11000000,%00000000
@@ -1871,6 +1900,7 @@ TrackData0
 	.byte %11110000,%11000000,%00000000
 	.byte %11110000,%11111111,%11111111
         .byte #120,#60	; bounds for finish line
+        .byte #22,#142	; starting heights
 
 TrackData1
 	.byte %11110000,%11111111,%11111111
@@ -1896,63 +1926,135 @@ TrackData1
 	.byte %01110000,%00000000,%00000000
 	.byte %11110000,%10000000,%00000000
 	.byte %11110000,%11111111,%11111111
-        .byte #124, #60	; bounds for finish lines
+        .byte #140, #50	; bounds for finish lines
+        .byte #14,#150
+        
 
 
 
-TrackData2
+TrackData5
 	.byte %11110000,%11111111,%11111111
-	.byte %11110000,%11000000,%00000000
-	.byte %11110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %01110000,%00000000,%00000000
-	.byte %00110000,%00000011,%00000000
-	.byte %00110000,%00001111,%00000000
-	.byte %00110000,%00011110,%11100000
-	.byte %00110000,%00011000,%11111000
-	.byte %00110000,%00000000,%11111100
-	.byte %00110000,%00000000,%11111110
-	.byte %00110000,%00000001,%11111111
+	.byte %01110000,%00001111,%11111111
 	.byte %00110000,%00000111,%11111111
-	.byte %00110000,%00011111,%00011111
-	.byte %00110000,%00011111,%00000111
-	.byte %00110000,%00011111,%00000011
-	.byte %00110000,%00011111,%00000001
-	.byte %00110000,%00001110,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%00000000
-	.byte %00110000,%00000000,%11100000
-	.byte %01110000,%00000000,%11110000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%11111000
+	.byte %00010000,%10000000,%00000000
+	.byte %00010000,%10001100,%00000000
+	.byte %00010000,%10011110,%00000000
+	.byte %00010000,%10011111,%11111111
+	.byte %00010000,%10011111,%00000001
+	.byte %00010000,%10011111,%00000000
+	.byte %00010000,%10011111,%00000000
+	.byte %00010000,%10011111,%00000000
+	.byte %00010000,%10011110,%10000100
+	.byte %00010000,%10011110,%11000100
+	.byte %00010000,%10001100,%11000100
+	.byte %00010000,%00000000,%11000010
+	.byte %00010000,%00000000,%11000000
+	.byte %00010000,%00000000,%11000000
+	.byte %00110000,%00000000,%11000000
+	.byte %01110000,%00000000,%11100000
 	.byte %11110000,%11111111,%11111111
-        .byte #120,#80	; bounds for finish lines
+
+
+
+
+
+        .byte #111,#106	; bounds for finish lines
+        ;
+        .byte #78,#115
 
 	.align #$100
+TrackData2
+	.byte %11110000,%11111111,%11111111
+	.byte %01110000,%00000001,%11111111
+	.byte %00110000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00111111,%00000011
+	.byte %00010000,%01111111,%11100011
+	.byte %00010000,%11111111,%11110001
+	.byte %00010000,%11111111,%11110000
+	.byte %00010000,%01111110,%11110000
+	.byte %00010000,%01111100,%11111000
+	.byte %00010000,%01110000,%11111100
+	.byte %00010000,%00000000,%11111110
+	.byte %00010000,%00000000,%11111111
+	.byte %00010000,%00011111,%11111111
+	.byte %00010000,%00111111,%11111111
+	.byte %00010000,%00011111,%11111111
+	.byte %00010000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %11110000,%00000000,%00000000
+	.byte %11110000,%11111111,%11111111
+	.byte %11110000,%11111111,%11111111
+
+         .byte #120,#55	; bounds for finish lines
+        .byte #22,#142
+        
 TrackData3
-	.byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$FF,$FF,$FF
-        .byte #$00,$00,$00
-        .byte #$00,$FF,$FF
-        .byte #160,#80
-	
+	.byte %11110000,%11111111,%10101010
+	.byte %01110000,%00000011,%11010101
+	.byte %00110000,%00000001,%11111111
+	.byte %00010000,%00000000,%11111111
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00110000,%00000000
+	.byte %00010000,%01111000,%00000000
+	.byte %00010000,%01111100,%00000000
+	.byte %00010000,%01111111,%11111111
+	.byte %00010000,%00111111,%11111111
+	.byte %00010000,%00001111,%00000011
+	.byte %00110000,%00000111,%00000001
+	.byte %00110000,%00000111,%00000001
+	.byte %01110000,%00000011,%00000001
+	.byte %11110000,%00000011,%11000001
+	.byte %11110000,%10000011,%11100001
+	.byte %11110000,%10000001,%11100000
+	.byte %11110000,%10000000,%11100000
+	.byte %11110000,%10000000,%11100000
+	.byte %11110000,%11000000,%11100000
+	.byte %11110000,%11100000,%11110000
+	.byte %11110000,%11111111,%11111111
+
+        .byte #111,#95	; bounds for finish lines
+        .byte #70,#123
+
+TrackData4
+	.byte %11110000,%11111111,%11111111
+	.byte %00110000,%00000000,%11000000
+	.byte %00010000,%00000000,%10000000
+	.byte %00010000,%00000000,%10000000
+	.byte %00010000,%00000000,%10000000
+	.byte %00010000,%00111111,%10000111
+	.byte %00010000,%01110000,%10000000
+	.byte %00010000,%01100000,%10000000
+	.byte %00010000,%01100000,%10000000
+	.byte %00010000,%01100000,%11000000
+	.byte %00010000,%01100001,%11111111
+	.byte %00010000,%01100000,%00000000
+	.byte %00010000,%01100000,%00000000
+	.byte %00010000,%01100000,%00000000
+	.byte %00010000,%01110000,%00000000
+	.byte %00010000,%01111111,%11111111
+	.byte %00010000,%00111111,%11111111
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00010000,%00000000,%00000000
+	.byte %00110000,%00000000,%00000000
+	.byte %01110000,%00000000,%00000000
+	.byte %11110000,%11111111,%11111111
+
+         .byte #60,#50	; bounds for finish lines
+        .byte #17,#70
+
+
+
+
+
+
 
 
 	
