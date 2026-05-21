@@ -803,8 +803,18 @@ NonRaceUpdate	subroutine
         cmp MenuSelect
         bne .NoTrack	; track select
        	jsr MenuTrackSave
-        rts   
+        rts  
 .NoTrack
+
+       	lda #1
+       	cmp MenuSelect	; laps select
+        bne .NoLaps
+        jsr MenuLapsSave
+  
+        rts
+        
+        
+.NoLaps	
  
        	lda #2
        	cmp MenuSelect	; game mode select
@@ -816,17 +826,10 @@ NonRaceUpdate	subroutine
         
         
 .NoMode	
-	lda #3
-        cmp MenuSelect
-        bne .NoColour	; colour select
+	; otherwise its just colour select
        	jsr MenuColourSave
         rts
         
-.NoColour
-
-	lda P2Laps	; otherwise just save the value
-        sta GameOptions,y
-	rts
  
  
 MenuTrackSave 	subroutine
@@ -891,6 +894,29 @@ MenuTrackSave 	subroutine
 .Not5
         rts
 
+MenuLapsSave	subroutine
+	lda P2Laps
+      	and #$0f	; take last digit
+        cmp #$a
+        bne .NotA
+        lda P2Laps	; add 5 to become decimal
+        adc #5		; carry will be clear because compare was equal
+        sta StartLaps
+        sta P2Laps
+        rts
+.NotA
+	cmp #$f		; check if it ends in f
+        bne .NotF
+        lda P2Laps	; counter was decremented, subtract 5
+        sbc #6		; carry will be clear from equals comparison
+        sta StartLaps
+        sta P2Laps
+        rts
+.NotF
+	lda P2Laps
+	sta StartLaps
+        rts
+        
 
 ModePosReset	subroutine
 	ldy #(3*23)+2	; offset total bytes of level data to find starting position heights
@@ -1503,7 +1529,7 @@ AbsVal	subroutine
         ;;;;;; -[Non-Code Data]- ;;;;;
         
 MenuRanges
-	.byte #5,#32,#2,#64
+	.byte #5,#$25,#2,#64
 
 ;Animations
 	align #$100   	; make address aligned or it takes too long to look up   
