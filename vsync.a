@@ -4,29 +4,21 @@
         include "xmacro.h"
 
 
-;;;; [TODO] ;;;;;
-; shmoovement
-; [X]	fractional position?	
-; [ ]	friction
-; [X]	boosting/energy
-;
-; [X] collision resolution
-;
-; game logic
-; [X]	laps counter/detection
-; [ ]	timer
 
-;title/different maps/modes?
+
 ;;;;;;;;;;;;;;;;;
 
+; equates/constants
 SpriteHeight	equ 9
 AnimOffset	equ 9
 EndAnim		equ 12
 EndBoostAnim	equ 30
 LapsHeight	equ 192 - 10
 
-NormAccel	equ 15
-BoostAccel	equ 32
+NormAccel	equ 20
+BoostAccel	equ 63
+FrictionAmt	equ 6
+BoostFriction	equ 30
 
 MaxEnergy	equ 175
 
@@ -109,6 +101,7 @@ LapsBuff	.ds 8*2
 
 
 Temp2		.byte	; the movement code (and maybe other stuff later) needs another random byte
+Temp3		.byte	; probably just going to be used for friction value
 TrackPtr	.word
 FinishTop	.byte
 FinishBot	.byte
@@ -345,10 +338,10 @@ EndUpdate
         lda P2PosX	; get X coordinate
         ldx #1		; player 0
         jsr SetHorizPos	; set coarse offset
-        lda #4
+        lda #3
         ldx #2		; missile/energy bar pos
         jsr SetHorizPos
-        lda #161 - 4
+        lda #161 - 3
         ldx #3		; missle/energy bar pos
         jsr SetHorizPos
         lda #80
@@ -704,7 +697,7 @@ NonRaceUpdate	subroutine
         sta COLUP1
 .P2Visible
         
-        lda #2
+        lda #4
         sta P1Laps		; starting countdown
         lda StartLaps
         sta P2Laps		; move lap counter to the actual laps
@@ -1107,7 +1100,13 @@ WallCollision	subroutine
         sta P1PrevPos,y	;store initial position in case of collision
         adc P1VelX,y
         sta P1PosX,y
-
+        
+       
+        cmp #$b0	; anything bigger than this is out of bounds
+        bcc .InBounds	; restore previous val if out of range
+        lda P1PrevPos,y	; restore value in this axis
+        sta P1PosX,y
+.InBounds
         
 ; player/wall collision
 ; this operates on the axis fom last frame, not this frame
@@ -1139,9 +1138,10 @@ WallCollision	subroutine
         lda #8
         sta CrashSound
         
-        
-       
 .NoWall
+
+     
+   
 	rts
         
         
@@ -1308,7 +1308,8 @@ MoveJoystick	subroutine
         ;sta P1Laps,x
 
 
-
+	lda #FrictionAmt
+        sta Temp3	; store regular friction amount in Temp3
         
 ; boost input
 ; stores the speed in Temp
@@ -1327,9 +1328,16 @@ P2Boost
         sec
 	sbc #2		; consume 2 boost meter
         bcc .NoBoost	; don't boost if you don't have enought energy
+        
         sta P1Energy,x
+        
+       
 	lda #BoostAccel ; store acceleration in Temp
         sta Temp
+        
+        lda #BoostFriction
+        sta Temp3	; store higher friction amount in Temp3
+        
         ; do sound effect
         lda #2
         sta AUDC1	; track settings
@@ -1346,6 +1354,9 @@ P2Boost
         jmp .EndBoost
 
 .NoBoost		; don't boost
+; do friction here while we know if we're boosting or not
+	
+        
 	lda #NormAccel ; store normal acceleration
         sta Temp
         		 
@@ -1357,8 +1368,11 @@ P2Boost
 .NoAnimReset
 .EndBoost
 
-
-
+; apply friction with value in Temp3
+	jsr DoFriction
+        inx
+        jsr DoFriction	; increment x to apply in y axis
+        dex
        
 ; modify velocity from inputs       
 ; y axis:
@@ -1524,8 +1538,44 @@ AbsVal	subroutine
         sbc P1VelY,x
 .PositiveY
         rts
+
+; apply fiction to velocity
+; x = player offset (0,2)
+; Temp3 = friction amount
+; add 1 to offset for y axis
+; we don't worry about it changing the sign when close to 0 because it isn't visible anyway
+DoFriction	subroutine
+	lda P1VelX,x	; check sign of x axis
+        bmi .NegX	
+        lda P1VelFX,x	; x is positive, subtract friction from velocity
         
+        sec
+        sbc Temp3
+        sta P1VelFX,x
+        bcs .Done	; if only fraction is affected we're done
+        dec P1VelX,x	; apply carry 
+        bpl .Done	; sign is still positive, we're good
+        lda #0		
+        sta P1VelX,x	; set velocity to 0 instead of changing sign
+        sta P1VelFX,x
+.PosXNoCarry
+
+        jmp .Done	; move on to y axis
         
+.NegX
+        lda P1VelFX,x	; x is negative, add friction to velocity
+        clc
+        adc Temp3
+        sta P1VelFX,x
+        bcc .NegXNoCarry	; it overflowed
+        inc P1VelX,x	; do carry 
+        bmi .Done	; check for sign change
+        lda #0
+        sta P1VelX,x	; set velocity to 0 instead of sign change
+        sta P1VelFX,x
+.NegXNoCarry
+.Done
+        rts
         ;;;;;; -[Non-Code Data]- ;;;;;
         
 MenuRanges
