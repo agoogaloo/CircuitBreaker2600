@@ -433,32 +433,49 @@ EndLapsMenuCheck
 ; draw the actual game
 FieldLoop
 
-; P1 energy bar
+; draw finish line
+	cpx FinishTop
+        bcs DrawFinish
+	cpx FinishBot
+        bcc DrawFinish
+        jmp FinishEnd
+
+DrawFinish
+	stx ENABL
+FinishEnd
+
+; draw energy bars
+	txa
+        and #2		; alternate bars to draw to save 2 clock cycles
+        beq P2Bar
+        
+        ; P1 energy bar
 	lda #0		; dont draw
         cpx P1Energy 	; is row < energy ?
         bcs SkipBar1
         ;lda #3
         txa		; draw dashed line
+        lsr
+        
 SkipBar1
 	sta ENAM0	; update if we draw line
-
+        jmp EndBars	; we don't have time to do P2s bar, just skip it
+        
+        
+P2Bar  
 ; P2 energy bar
-        ;lda #0
+        lda #0		; this is needed
 	cpx P2Energy	
         bcs SkipBar2
         txa
+        lsr
 SkipBar2
 	sta ENAM1	; draw missile (for the bar)
+EndBars
+
+
         
-; draw finish line
-	cpx FinishBot
-        bcc DrawFinish
-        cpx FinishTop
-        bcs DrawFinish
-        jmp FinishEnd
-DrawFinish
-	stx ENABL
-FinishEnd
+
 	
 
 ; draw playfield/map
