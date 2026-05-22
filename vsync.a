@@ -143,7 +143,7 @@ Reset
         sta P2PosX
         lda #$1F
         sta COLUP0
-        lda #$5e
+        lda #$8e
         sta COLUP1
         
 ; lap counter
@@ -977,21 +977,15 @@ ModePosReset	subroutine
         
 ; update and save colours
 MenuColourSave	subroutine
-	lda P2Laps
-        sta ColourNum
-        asl
-        asl		; multiply by 8
-        asl
-        ;asl
-        tax		; save to use with P2
-        adc #$1F	; add offset to base colour
-        sta COLUP0
-        txa
+	ldx P2Laps
+        stx ColourNum
         
-        adc #$5F	; add offset to base colour
+        lda ColourData,x	; load 1st colour
+        sta COLUP0		; store in P1
+        
+        inx
+        lda ColourData,x	; load 2nd colour
         sta COLUP1
-
-        
 	rts
 
 ; Initilizes rest of track based on trackPtr
@@ -1579,7 +1573,7 @@ DoFriction	subroutine
         ;;;;;; -[Non-Code Data]- ;;;;;
         
 MenuRanges
-	.byte #5,#$25,#2,#64
+	.byte #5,#$25,#2,#15
 
 ;Animations
 	align #$100   	; make address aligned or it takes too long to look up   
@@ -1948,7 +1942,13 @@ ModesBitmap
         .byte #%10001010;--
         .byte #%10001010;--
         .byte #%01100110;--
-     	.align #$100   
+
+; player colour options
+ColourData  
+	.byte $1F,$8E,$3F,$5F,$EF,$BA,$4a,$2F
+        .byte $1F,$C3,$D8,$F0, $56,$46,$76,$0F,$00
+
+	align #$100
 ; Tracks
 TrackData0	
 	
@@ -2123,7 +2123,7 @@ TrackData4
 	.byte %01110000,%00000000,%00000000
 	.byte %11110000,%11111111,%11111111
 
-         .byte #60,#50	; bounds for finish lines
+        .byte #60,#50	; bounds for finish lines
         .byte #17,#70
 
 
