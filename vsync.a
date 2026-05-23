@@ -434,6 +434,7 @@ EndLapsMenuCheck
 FieldLoop
 
 ; draw finish line
+	
 	cpx FinishTop
         bcs DrawFinish
 	cpx FinishBot
@@ -547,9 +548,8 @@ SkipP2
 
 ; 29 lines of overscan
 	TIMER_SETUP 29
-        lda #0
-        sta ENAM0
-        sta ENAM1
+        lda #2
+        sta VBLANK
         TIMER_WAIT
 ; total = 262 lines, go to next frame
         jmp NextFrame
