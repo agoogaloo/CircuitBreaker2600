@@ -20,9 +20,9 @@ You can also play it in your browser on 8bitworkshop [Here](http://8bitworkshop.
 (typically arrowkeys/space are P1 and tfgh/a are P2, but this can be different depending on the emulator (and can usually be rebound if needed))
 
 ## Game Modes
-- 0 - (Standard race): First to complate the number of laps wins!
-- 1 ---  (Time trial): Try to get the best time you can by yourself
-- 2 -- (Special Race): Get a number of laps ahead of your opponent to win
+- 0 (Standard race): First to complate the number of laps wins!
+- 1 (Time trial): Try to get the best time you can by yourself
+- 2 (Special Race): Get a number of laps ahead of your opponent to win
 
 The track, game mode, lap count, and ship colour can be changed in the main menu using the joystick. \
 Your time is displayed in the lap counters at the end of the race (in hexadecimal). Compete with your friends to get the best time!
