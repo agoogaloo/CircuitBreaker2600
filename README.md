@@ -24,5 +24,5 @@ You can also play it in your browser on 8bitworkshop [Here](http://8bitworkshop.
 - 1 ---  (Time trial): Try to get the best time you can by yourself
 - 2 -- (Special Race): Get a number of laps ahead of your opponent to win
 
-The track, game mode, lap count, and ship colous can be changed in the main menu using the joystick. \
+The track, game mode, lap count, and ship colour can be changed in the main menu using the joystick. \
 Your time is displayed in the lap counters at the end of the race (in hexadecimal). Compete with your friends to get the best time!
