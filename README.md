@@ -16,6 +16,7 @@ You can also play it in your browser on 8bitworkshop [Here](http://8bitworkshop.
 ## Controls
 - Joystick --- Move in direction/change menu selection
 - Button ----- Boost/accept menu
+- Drift to regain boost meter
 
 (typically arrowkeys/space are P1 and tfgh/a are P2, but this can be different depending on the emulator (and can usually be rebound if needed))
 
