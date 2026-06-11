@@ -4,8 +4,9 @@
 This is a demake of [Circuit Breaker](https://github.com/vicente-david/Circuit-Breaker) (A previous game I helped make) for the atari 2600. It has been adapted to fit within the hardware contraints of the atari 2600 (4 KB ROM and 128 bytes of RAM). The game was written in 6502 assembly using [8bitWorkshop IDE](https://8bitworkshop.com/).
 
 ## Running
-The latest ROM can be downlaoded from Releases and played with your favourite atari 2600 emulator ([Stella](https://stella-emu.github.io/downloads.html) is a good one) or real hardware if you happen to have an atari 2600 and a flash cart.\
-You can also play it in your browser on 8bitworkshop [Here](http://8bitworkshop.com/redir.html?platform=vcs&githubURL=https%3A%2F%2Fgithub.com%2Fagoogaloo%2FCircuitBreaker2600&file=vsync.a).
+The simplest way is to run it in your browser on 8bitworkshop [Here](http://8bitworkshop.com/redir.html?platform=vcs&githubURL=https%3A%2F%2Fgithub.com%2Fagoogaloo%2FCircuitBreaker2600&file=vsync.a).\
+You can also download the latest ROM from Releases and play it with your favourite atari 2600 emulator ([Stella](https://stella-emu.github.io/downloads.html) is a good one), or real hardware if you happen to have an atari 2600 and a flash cart.
+
 
 ## Features
 - Fast racing action for up to 2 players!
